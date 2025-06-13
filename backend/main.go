@@ -63,15 +63,18 @@ func main() {
 	go func() {
 		log.Printf("Server starting on %s", serverAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			// 如果錯誤不是因為主動關閉伺服器，就記錄錯誤並結束程式
 			log.Fatalf("Could not listen on %s: %v", serverAddr, err)
 		}
 	}()
 
+	//當按下 Ctrl+C，程式會收到 SIGINT
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigChan
 	log.Printf("Received signal %s, shutting down server...", sig)
 
+	//最多等30秒關閉，避免資料損壞，請求中斷
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

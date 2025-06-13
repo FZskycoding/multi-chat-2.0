@@ -1,3 +1,4 @@
+// models/user.go
 package models
 
 import (
@@ -11,7 +12,20 @@ type RegisterRequest struct {
 	Password string `json:"password"`
 }
 
-// errorResponse 結構體用於返回 JSON 格式的錯誤訊息
+// LoginResponse 結構體用於登入成功後的響應
+type LoginResponse struct {
+	Message  string `json:"message"`
+	ID       string `json:"id"`
+	Username string `json:"username"`
+}
+
+// RegisterResponse 結構體用於註冊成功後的響應
+type RegisterResponse struct {
+	Message string `json:"message"`
+	ID      string `json:"id"`
+}
+
+// ErrorResponse 結構體用於返回 JSON 格式的錯誤訊息
 type ErrorResponse struct {
 	Message string `json:"message"`
 }
@@ -24,5 +38,10 @@ type User struct {
 	Password string             `bson:"password" json:"-"`                 // 儲存哈希後的密碼，JSON 輸出時忽略
 }
 
-// 註：`Password` 欄位在儲存到資料庫前會被哈希，`json:"-"` 表示在 JSON 序列化時忽略此欄位，避免將密碼暴露出去。
-// `unique:"true"` 是一個示意，實際的唯一索引會在 MongoDB 操作時建立。
+// PublicUser 結構體用於返回給前端，不包含敏感資訊
+type PublicUser struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	// 可以添加其他非敏感字段
+}

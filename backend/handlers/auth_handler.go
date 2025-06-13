@@ -36,40 +36,37 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 基本的輸入驗證
+	if registerReq.Email == "" || registerReq.Username == "" || registerReq.Password == "" {
+		sendJSONError(w, "Email, username, and password are required", http.StatusBadRequest)
+		return
+	}
+
 	usersCollection := database.GetCollection("users")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 先檢查 Email，如果存在則直接返回
-	var existingUser models.User
-	err := usersCollection.FindOne(ctx, bson.M{"email": registerReq.Email}).Decode(&existingUser)
-	if err == nil {
-		sendJSONError(w, "Email already registered", http.StatusConflict)
-		return
-	}
-
-	// 如果不是找不到文件，而是其他錯誤(伺服器等等問題)
-	if err != mongo.ErrNoDocuments { 
+	// 檢查 Email 是否已存在
+	count, err := usersCollection.CountDocuments(ctx, bson.M{"email": registerReq.Email})
+	if err != nil {
 		log.Printf("Error checking existing email: %v", err)
 		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	// 如果 Email 不存在，再檢查 Username
-	err = usersCollection.FindOne(ctx, bson.M{"username": registerReq.Username}).Decode(&existingUser)
-	if err == nil {
-		sendJSONError(w, "Username already taken", http.StatusConflict)
+	if count > 0 {
+		sendJSONError(w, "Email already registered", http.StatusConflict)
 		return
 	}
-	if err != mongo.ErrNoDocuments {
+
+	// 檢查 Username 是否已存在
+	count, err = usersCollection.CountDocuments(ctx, bson.M{"username": registerReq.Username})
+	if err != nil {
 		log.Printf("Error checking existing username: %v", err)
 		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	// 基本的輸入驗證
-	if registerReq.Email == "" || registerReq.Username == "" || registerReq.Password == "" {
-		sendJSONError(w, "Email, username, and password are required", http.StatusBadRequest)
+	if count > 0 {
+		sendJSONError(w, "Username already taken", http.StatusConflict)
 		return
 	}
 
@@ -97,13 +94,15 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("User registered successfully: %v", result.InsertedID)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated) // 201 Created
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "User registered successfully",
-		"id":      result.InsertedID.(primitive.ObjectID).Hex(),
+	json.NewEncoder(w).Encode(models.RegisterResponse{
+		Message: "User registered successfully",
+		ID:      result.InsertedID.(primitive.ObjectID).Hex(),
 	})
 }
 
+// LoginUser 處理使用者登入請求
 // LoginUser 處理使用者登入請求
 func LoginUser(w http.ResponseWriter, r *http.Request) {
 	var credentials struct {
@@ -133,7 +132,6 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			sendJSONError(w, "Invalid credentials", http.StatusUnauthorized)
-
 		} else {
 			log.Printf("Error finding user by email: %v", err)
 			sendJSONError(w, "Internal server error", http.StatusInternalServerError)
@@ -149,12 +147,13 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 
 	// 登入成功
 	log.Printf("User logged in successfully: %s", user.Email)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK) // 200 OK
 	// 回傳使用者 ID 和 Username 給前端
-	json.NewEncoder(w).Encode(map[string]string{
-		"message":  "Login successful",
-		"id":       user.ID.Hex(), // 將 ObjectID 轉換為 Hex 字串
-		"username": user.Username,
+	json.NewEncoder(w).Encode(models.LoginResponse{
+		Message:  "Login successful",
+		ID:       user.ID.Hex(), // 將 ObjectID 轉換為 Hex 字串
+		Username: user.Username,
 	})
 }
 
@@ -165,7 +164,7 @@ func GetAllUsers(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// 查找所有使用者
-	cursor, err := usersCollection.Find(ctx, bson.M{}) // bson.M{} 表示無條件查找所有文檔
+	cursor, err := usersCollection.Find(ctx, bson.M{})
 	if err != nil {
 		log.Printf("Error finding all users: %v", err)
 		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
@@ -180,17 +179,19 @@ func GetAllUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 為了安全，在返回給前端前，將密碼字段清空 (儘管模型中已經有 `json:"-"`，但這是額外防護)
-	// 或者創建一個不包含密碼的 DTO (Data Transfer Object)
-	var safeUsers []models.User
+	// 創建一個只包含公開資訊的 PublicUser 列表
+	var publicUsers []models.PublicUser
 	for _, user := range users {
-		user.Password = "" // 清空密碼字段
-		safeUsers = append(safeUsers, user)
+		publicUsers = append(publicUsers, models.PublicUser{
+			ID:       user.ID.Hex(),
+			Username: user.Username,
+			Email:    user.Email, // 考慮是否要暴露 Email，如果不需要可以移除
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(safeUsers); err != nil {
-		log.Printf("Error encoding users: %v", err)
+	if err := json.NewEncoder(w).Encode(publicUsers); err != nil {
+		log.Printf("Error encoding public users: %v", err)
 		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
