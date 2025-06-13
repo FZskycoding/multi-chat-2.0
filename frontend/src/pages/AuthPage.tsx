@@ -17,7 +17,7 @@ import { register, login } from "../api/auth";
 import { saveUserSession } from "../utils/auth";
 
 function AuthPage() {
-  const [isRegister, setIsRegister] = useState(true);
+  const [isRegister, setIsRegister] = useState(false);
   const navigate = useNavigate();
 
   const registerForm = useForm({
@@ -51,6 +51,7 @@ function AuthPage() {
         // 註冊成功後，自動切換到登入介面
         setIsRegister(false);
         loginForm.setFieldValue("email", values.email); // 填充已註冊的 Email
+        loginForm.setFieldValue("password", ""); // 顯式清空密碼欄位
       }
     } catch (error) {
       console.error("註冊處理失敗:", error);

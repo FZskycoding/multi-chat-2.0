@@ -52,12 +52,14 @@ export async function register(
     });
     return data;
   } catch (error) {
-    console.error("註冊請求錯誤:", error);
-    notifications.show({
-      title: "網路錯誤",
-      message: "無法連線到伺服器，請檢查網路。",
-      color: "red",
-    });
+    // `TypeError` 通常表示網路錯誤 (例如 CORS 錯誤、離線等)
+    if (error instanceof TypeError) {
+      notifications.show({
+        title: "網路錯誤",
+        message: "無法連線到伺服器，請檢查網路。",
+        color: "red",
+      });
+    }
     throw error;
   }
 }
@@ -91,16 +93,14 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
     });
     return data;
   } catch (error) {
-    console.error("登入請求錯誤:", error);
     // 只有當它是真正的網路連線錯誤 (例如 fetch 失敗，沒有收到 response) 時才顯示
     if (error instanceof TypeError) {
-      // `TypeError` 通常表示網路錯誤 (例如 CORS 錯誤、離線等)
       notifications.show({
         title: "網路錯誤",
         message: "無法連線到伺服器，請檢查網路。",
         color: "red"
       });
     }
-    throw error; // 繼續向上拋出，讓外層的 handleLogin 也能捕獲
+    throw error; 
   }
 }

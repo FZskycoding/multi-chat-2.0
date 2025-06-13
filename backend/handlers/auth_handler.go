@@ -47,7 +47,9 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, "Email already registered", http.StatusConflict)
 		return
 	}
-	if err != mongo.ErrNoDocuments { // 如果不是找不到文件，而是其他錯誤
+
+	// 如果不是找不到文件，而是其他錯誤(伺服器等等問題)
+	if err != mongo.ErrNoDocuments { 
 		log.Printf("Error checking existing email: %v", err)
 		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
 		return
