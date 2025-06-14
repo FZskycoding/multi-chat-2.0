@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson" // 引入 bson 套件
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -45,6 +46,43 @@ func GetCollection(collectionName string) *mongo.Collection {
 	// cfg.DBName 應該從 main.go 傳入或從 config.LoadConfig() 獲取
 	// 這裡先寫死 dbName，稍後在 main.go 中會完善
 	return MongoClient.Database(dbName).Collection(collectionName) // 替換為你的 DB Name
+}
+
+// InsertMessage 將聊天訊息插入到 MongoDB
+func InsertMessage(message interface{}) (*mongo.InsertOneResult, error) {
+	collection := GetCollection("messages") // 獲取 messages 集合
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := collection.InsertOne(ctx, message)
+	if err != nil {
+		log.Printf("Error inserting message: %v", err)
+		return nil, err
+	}
+	log.Printf("Message inserted with ID: %v", result.InsertedID)
+	return result, nil
+}
+
+// GetMessages 獲取指定數量的歷史訊息
+func GetMessages(limit int64) ([]interface{}, error) {
+	collection := GetCollection("messages")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(limit)
+	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
+	if err != nil {
+		log.Printf("Error finding messages: %v", err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var messages []interface{}
+	if err = cursor.All(ctx, &messages); err != nil {
+		log.Printf("Error decoding messages: %v", err)
+		return nil, err
+	}
+	return messages, nil
 }
 
 // DisconnectMongoDB 關閉 MongoDB 連線

@@ -13,6 +13,7 @@ import (
 	"go-chat/backend/config"   
 	"go-chat/backend/database" 
 	"go-chat/backend/handlers"
+	"go-chat/backend/websocket" // 引入 websocket 套件
 
 	"github.com/gorilla/mux"
 	"github.com/rs/cors" // 引入 CORS 庫
@@ -23,6 +24,9 @@ func main() {
 
 	database.ConnectMongoDB(cfg.MongoDBURI, cfg.DBName)
 	defer database.DisconnectMongoDB()
+
+	// 啟動 WebSocket Hub
+	go websocket.GlobalHub.Run()
 
 	router := mux.NewRouter()
 
@@ -37,6 +41,9 @@ func main() {
 	router.HandleFunc("/login", handlers.LoginUser).Methods("POST")
 	// 新增：獲取所有使用者 API 路由
 	router.HandleFunc("/users", handlers.GetAllUsers).Methods("GET") 
+
+	// WebSocket 路由
+	router.HandleFunc("/ws", websocket.HandleConnections)
 
 	// 設置 CORS 中介軟體
 	// 允許來自任何來源的請求，並允許 POST, GET, OPTIONS 方法
