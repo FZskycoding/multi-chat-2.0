@@ -33,6 +33,19 @@ func ConnectMongoDB(uri, name string) {
 	log.Println("Connected to MongoDB successfully!")
 	MongoClient = client
 	dbName = name // 初始化 dbName
+
+	// 為 messages 集合設定 TTL 索引
+	messagesCollection := MongoClient.Database(dbName).Collection("messages")
+	indexModel := mongo.IndexModel{
+		Keys:    bson.D{{Key: "timestamp", Value: 1}}, // 在 timestamp 欄位上建立升序索引
+		Options: options.Index().SetExpireAfterSeconds(1800), // 設定 30 分鐘 (1800 秒) 後過期
+	}
+
+	_, err = messagesCollection.Indexes().CreateOne(ctx, indexModel)
+	if err != nil {
+		log.Fatalf("Failed to create TTL index for messages collection: %v", err)
+	}
+	log.Println("TTL index created for messages collection (30 minutes).")
 }
 
 // GetCollection 獲取指定資料庫的集合
@@ -43,8 +56,6 @@ func GetCollection(collectionName string) *mongo.Collection {
 	if dbName == "" { // 額外防護，確保 dbName 已初始化
 		log.Fatal("Database name is not set. Call ConnectMongoDB with a valid dbName.")
 	}
-	// cfg.DBName 應該從 main.go 傳入或從 config.LoadConfig() 獲取
-	// 這裡先寫死 dbName，稍後在 main.go 中會完善
 	return MongoClient.Database(dbName).Collection(collectionName) // 替換為你的 DB Name
 }
 
