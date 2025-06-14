@@ -255,15 +255,15 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	// 在單獨的 goroutine 中發送歷史訊息
 	go func() {
 		// 獲取最近的 50 條歷史訊息
-		messages, err := database.GetMessages(50)
+		historicalMessages, err := database.GetMessages(50)
 		if err != nil {
 			log.Printf("Error getting historical messages: %v", err)
 			return
 		}
 
 		// 將歷史訊息發送給新連接的客戶端
-		for i := len(messages) - 1; i >= 0; i-- { // 反向發送以確保順序
-			if msg, ok := messages[i].(models.Message); ok {
+		for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
+			if msg, ok := historicalMessages[i].(models.Message); ok {
 				select {
 				case client.send <- msg:
 				case <-time.After(time.Second): // 防止阻塞
@@ -271,7 +271,32 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			} else {
-				log.Printf("Failed to cast historical message to models.Message: %+v", messages[i])
+				log.Printf("Failed to cast historical message to models.Message: %+v", historicalMessages[i])
+			}
+		}
+
+		// 獲取並發送未讀訊息
+		unreadMessages, err := database.GetUnreadMessages(client.UserID)
+		if err != nil {
+			log.Printf("Error getting unread messages for client %s: %v", client.UserID.Hex(), err)
+			return
+		}
+
+		var unreadMessageIDs []primitive.ObjectID
+		for _, msg := range unreadMessages {
+			select {
+			case client.send <- msg:
+				unreadMessageIDs = append(unreadMessageIDs, msg.ID)
+			case <-time.After(time.Second): // 防止阻塞
+				log.Printf("Timeout sending unread message to client %s", client.UserID.Hex())
+				break // 跳出內層 select，繼續處理下一個未讀訊息
+			}
+		}
+
+		// 將已發送的未讀訊息標記為已讀
+		if len(unreadMessageIDs) > 0 {
+			if _, err := database.MarkMessagesAsRead(unreadMessageIDs); err != nil {
+				log.Printf("Error marking unread messages as read for client %s: %v", client.UserID.Hex(), err)
 			}
 		}
 	}()

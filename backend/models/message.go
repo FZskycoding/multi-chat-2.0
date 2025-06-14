@@ -14,4 +14,5 @@ type Message struct {
 	RecipientID  primitive.ObjectID `bson:"recipientId,omitempty" json:"recipientId,omitempty"` // 新增接收者ID
 	Content      string             `bson:"content" json:"content"`
 	Timestamp    time.Time          `bson:"timestamp" json:"timestamp"`
+	IsRead       bool               `bson:"isRead" json:"isRead"` // 新增已讀狀態
 }

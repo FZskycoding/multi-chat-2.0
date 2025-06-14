@@ -5,7 +5,10 @@ import (
 	"log"
 	"time"
 
+	"go-chat/backend/models" // 引入 models 套件
+
 	"go.mongodb.org/mongo-driver/bson" // 引入 bson 套件
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -60,10 +63,13 @@ func GetCollection(collectionName string) *mongo.Collection {
 }
 
 // InsertMessage 將聊天訊息插入到 MongoDB
-func InsertMessage(message interface{}) (*mongo.InsertOneResult, error) {
+func InsertMessage(message models.Message) (*mongo.InsertOneResult, error) {
 	collection := GetCollection("messages") // 獲取 messages 集合
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// 確保新訊息的 IsRead 預設為 false
+	message.IsRead = false
 
 	result, err := collection.InsertOne(ctx, message)
 	if err != nil {
@@ -94,6 +100,48 @@ func GetMessages(limit int64) ([]interface{}, error) {
 		return nil, err
 	}
 	return messages, nil
+}
+
+// GetUnreadMessages 獲取特定使用者所有未讀的訊息
+func GetUnreadMessages(recipientID primitive.ObjectID) ([]models.Message, error) {
+	collection := GetCollection("messages")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	filter := bson.M{"recipientId": recipientID, "isRead": false}
+	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: 1}}) // 按時間戳升序排列
+
+	cursor, err := collection.Find(ctx, filter, findOptions)
+	if err != nil {
+		log.Printf("Error finding unread messages for recipient %s: %v", recipientID.Hex(), err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var messages []models.Message
+	if err = cursor.All(ctx, &messages); err != nil {
+		log.Printf("Error decoding unread messages: %v", err)
+		return nil, err
+	}
+	return messages, nil
+}
+
+// MarkMessagesAsRead 將特定訊息標記為已讀
+func MarkMessagesAsRead(messageIDs []primitive.ObjectID) (*mongo.UpdateResult, error) {
+	collection := GetCollection("messages")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": bson.M{"$in": messageIDs}}
+	update := bson.M{"$set": bson.M{"isRead": true}}
+
+	result, err := collection.UpdateMany(ctx, filter, update)
+	if err != nil {
+		log.Printf("Error marking messages as read: %v", err)
+		return nil, err
+	}
+	log.Printf("Marked %d messages as read.", result.ModifiedCount)
+	return result, nil
 }
 
 // DisconnectMongoDB 關閉 MongoDB 連線

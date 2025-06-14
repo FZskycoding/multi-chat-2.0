@@ -40,6 +40,7 @@ export async function register(
         title: "註冊失敗",
         message: data.message || "發生未知錯誤",
         color: "red",
+        autoClose: 2000
       });
       throw new Error(data.message || "註冊失敗");
     }
@@ -49,6 +50,7 @@ export async function register(
       title: "註冊成功",
       message: "帳號已建立，請登入！",
       color: "green",
+      autoClose: 1500,
     });
     return data;
   } catch (error) {
@@ -58,6 +60,7 @@ export async function register(
         title: "網路錯誤",
         message: "無法連線到伺服器，請檢查網路。",
         color: "red",
+        autoClose: 2000,
       });
     }
     throw error;
@@ -82,6 +85,7 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
         title: "登入失敗",
         message: data.message || "電子郵件或密碼不正確",
         color: "red",
+        autoClose: 2000,
       });
       throw new Error(data.message || "登入失敗");
     }
@@ -90,6 +94,7 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
       title: "登入成功",
       message: `歡迎回來，${data.username}！`,
       color: "green",
+      autoClose: 1500,
     });
     return data;
   } catch (error) {
@@ -98,7 +103,8 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
       notifications.show({
         title: "網路錯誤",
         message: "無法連線到伺服器，請檢查網路。",
-        color: "red"
+        color: "red",
+        autoClose: 2000
       });
     }
     throw error; 
