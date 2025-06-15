@@ -299,7 +299,7 @@ function HomePage() {
                   }}
                 >
                   <Avatar color="blue" radius="xl">
-                    <IconUserCircle size={(24)} />
+                    <IconUserCircle size={24} />
                   </Avatar>
                   <Text ml="md" fw={500}>
                     {user.username}
@@ -350,12 +350,12 @@ function HomePage() {
                         shadow="xs"
                         bg={
                           msg.senderId === userSession.id
-                            ? "var(--mantine-color-blue-light)"
-                            : "var(--mantine-color-gray-2)"
+                            ? "#c3efab" //淺綠色
+                            : "#cde2ff" //淺藍色
                         }
                         style={{ maxWidth: "70%" }}
                       >
-                        <Text size="xs" c="dimmed">
+                        <Text size="xs" c="dark">
                           {msg.senderUsername} (
                           {new Date(msg.timestamp).toLocaleTimeString()})
                         </Text>
