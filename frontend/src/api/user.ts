@@ -7,6 +7,7 @@ interface User {
   email: string;
 }
 
+//回傳一個裝著 User 陣列的 Promise
 export const getAllUsers = async (): Promise<User[]> => {
   try {
     const response = await fetch("http://localhost:8080/users", {

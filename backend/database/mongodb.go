@@ -35,15 +35,17 @@ func ConnectMongoDB(uri, name string) {
 
 	log.Println("Connected to MongoDB successfully!")
 	MongoClient = client
-	dbName = name // 初始化 dbName
+	dbName = name 
 
-	// 為 messages 集合設定 TTL 索引
+	
 	messagesCollection := MongoClient.Database(dbName).Collection("messages")
+	// 設定規則:自動清理超過30分鐘的訊息
 	indexModel := mongo.IndexModel{
-		Keys:    bson.D{{Key: "timestamp", Value: 1}}, // 在 timestamp 欄位上建立升序索引
+		Keys:    bson.D{{Key: "timestamp", Value: 1}}, // value:1代表升序(由舊到新)
 		Options: options.Index().SetExpireAfterSeconds(1800), // 設定 30 分鐘 (1800 秒) 後過期
 	}
 
+	// 套用規則
 	_, err = messagesCollection.Indexes().CreateOne(ctx, indexModel)
 	if err != nil {
 		log.Fatalf("Failed to create TTL index for messages collection: %v", err)
@@ -62,7 +64,7 @@ func GetCollection(collectionName string) *mongo.Collection {
 	return MongoClient.Database(dbName).Collection(collectionName) // 替換為你的 DB Name
 }
 
-// InsertMessage 將聊天訊息插入到 MongoDB
+// 將新的聊天訊息插入到 MongoDB
 func InsertMessage(message models.Message) (*mongo.InsertOneResult, error) {
 	collection := GetCollection("messages") // 獲取 messages 集合
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -80,13 +82,15 @@ func InsertMessage(message models.Message) (*mongo.InsertOneResult, error) {
 	return result, nil
 }
 
-// GetMessages 獲取指定數量的歷史訊息
+// 獲取指定數量的歷史訊息
 func GetMessages(limit int64) ([]interface{}, error) {
 	collection := GetCollection("messages")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// 設定查詢條件，value:-1代表降序(由新到舊)
 	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(limit)
+
 	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
 	if err != nil {
 		log.Printf("Error finding messages: %v", err)
@@ -94,6 +98,7 @@ func GetMessages(limit int64) ([]interface{}, error) {
 	}
 	defer cursor.Close(ctx)
 
+	// 將資料全部讀出來並放入陣列 messages，然後return出去
 	var messages []interface{}
 	if err = cursor.All(ctx, &messages); err != nil {
 		log.Printf("Error decoding messages: %v", err)

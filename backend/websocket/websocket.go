@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	// Time allowed to write a message to the peer.
+	// 將訊息寫入到遠端對等點的最長時間
 	writeWait = 10 * time.Second
 
-	// Time allowed to read the next pong message from the peer.
+	// 允許從遠端對等點讀取下一個 pong 訊息的最長時間。
 	pongWait = 60 * time.Second
 
-	// Send pings to peer with this period. Must be less than pongWait.
+	// 發送 ping 訊息給遠端對等點的週期。
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer.
@@ -263,10 +263,11 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 
 		// 將歷史訊息發送給新連接的客戶端
 		for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
+			// 檢查是否符合models.Message的定義
 			if msg, ok := historicalMessages[i].(models.Message); ok {
 				select {
 				case client.send <- msg:
-				case <-time.After(time.Second): // 防止阻塞
+				case <-time.After(time.Second): // 防止阻塞(如果訊息放入時等待超過1秒鐘就return)
 					log.Printf("Timeout sending historical message to client %s", client.UserID.Hex())
 					return
 				}
