@@ -12,6 +12,7 @@ export const saveUserSession = (session: UserSession) => {
   localStorage.setItem(USER_SESSION_KEY, JSON.stringify(session));
 };
 
+// 回傳的型別是 UserSession 或 null
 export const getUserSession = (): UserSession | null => {
   const sessionString = localStorage.getItem(USER_SESSION_KEY);
   if (sessionString) {
