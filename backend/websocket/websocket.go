@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	// Time allowed to write a message to the peer.
+	// 將訊息寫入到遠端對等點的最長時間
 	writeWait = 10 * time.Second
 
-	// Time allowed to read the next pong message from the peer.
+	// 允許從遠端對等點讀取下一個 pong 訊息的最長時間。
 	pongWait = 60 * time.Second
 
-	// Send pings to peer with this period. Must be less than pongWait.
+	// 發送 ping 訊息給遠端對等點的週期。
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer.

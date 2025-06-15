@@ -47,16 +47,16 @@ interface Message {
 }
 
 function HomePage() {
-  const navigate = useNavigate();
-  const [userSession, setUserSession] = useState(getUserSession());
+  const navigate = useNavigate(); // 能夠導航到各個route
+  const [userSession, setUserSession] = useState(getUserSession()); //檢查使用者有沒有登入過
   const [opened, { toggle }] = useDisclosure();
-  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]); //把網站上除了自己以外的使用者抓下來，讓你選擇要跟誰聊天。
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null); // WebSocket 實例
   const [messageInput, setMessageInput] = useState(""); // 訊息輸入框內容
   const [messages, setMessages] = useState<Map<string, Message[]>>(new Map()); // 聊天訊息列表，按使用者ID分組
 
-  const messagesEndRef = useRef<HTMLDivElement>(null); // 用於自動滾動到底部
+  const messagesEndRef = useRef<HTMLDivElement>(null); // 發送或接收訊息時，自動滾動到底部
 
   // 滾動到最新訊息
   const scrollToBottom = () => {
@@ -72,7 +72,7 @@ function HomePage() {
     // 獲取所有使用者列表
     const fetchAllUsers = async () => {
       const users = await getAllUsers(); // 調用新的 API 函數
-      if (userSession) { // 確保 userSession 存在
+      if (userSession) {
         setAllUsers(users.filter((u: User) => u.id !== userSession!.id)); // 使用非空斷言
       }
     };
@@ -91,6 +91,8 @@ function HomePage() {
       });
     };
 
+    //收到訊息的時候，會判斷這是誰傳來的
+    //然後把這則訊息加到正確的「對話記錄」裡面
     newWs.onmessage = (event) => {
       const receivedMessage: Message = JSON.parse(event.data);
       console.log("收到訊息:", receivedMessage);
@@ -184,7 +186,6 @@ function HomePage() {
 
   const exitChat = () => {
     setSelectedUser(null);
-    // 退出聊天室時不清空訊息，保持在 Map 中
     notifications.show({
       title: "退出聊天室",
       message: "你已回到首頁",
@@ -192,6 +193,8 @@ function HomePage() {
     });
   };
 
+
+  // 使用者發送訊息
   const handleSendMessage = () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       notifications.show({
@@ -202,8 +205,9 @@ function HomePage() {
       return;
     }
 
+    // 不發送空訊息
     if (messageInput.trim() === "") {
-      return; // 不發送空訊息
+      return;
     }
 
     const messageToSend: Partial<Message> = {
