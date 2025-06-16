@@ -27,11 +27,6 @@ const (
 	maxMessageSize = 512
 )
 
-var (
-	newline = []byte{'\n'}
-	space   = []byte{' '}
-)
-
 // upgrader 用於將 HTTP 連線升級為 WebSocket 連線
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -90,7 +85,7 @@ func (c *Client) readPump() {
 			return
 		}
 
-		// 設置訊息的 ID 為資料庫生成的 ID
+		// 設置訊息的 ID 為資料庫生成的唯一 ID
 		msg.ID = result.InsertedID.(primitive.ObjectID)
 
 		// 將包含 ID 的訊息廣播給所有客戶端
@@ -107,6 +102,7 @@ func (c *Client) writePump() {
 	}()
 	for {
 		select {
+		//負責處理從 Hub 或其他地方發送到 client.send 通道的實際聊天訊息，並將其傳送給客戶端瀏覽器。
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
@@ -122,29 +118,14 @@ func (c *Client) writePump() {
 				return
 			}
 
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
+			// 直接寫入訊息，不檢查 channel 裡還有幾個訊息並將其合併
+			// 每次只發送一個 JSON 物件
+			if err := c.conn.WriteMessage(websocket.TextMessage, jsonMessage); err != nil {
+				log.Printf("Error writing message: %v", err)
 				return
 			}
-			w.Write(jsonMessage)
 
-			// 檢查 channel 裡還有幾個訊息
-			// 把後續的訊息一個一個繼續拿出來包進同一個 WebSocket frame 裡，
-			// 每一個訊息之間，就會插入 newline，這樣訊息之間才不會黏在一起。
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				w.Write(newline)
-				queuedMsg, err := json.Marshal(<-c.send)
-				if err != nil {
-					log.Printf("Error marshalling queued message: %v", err)
-					continue
-				}
-				w.Write(queuedMsg)
-			}
-
-			if err := w.Close(); err != nil {
-				return
-			}
+		// 接收定時器以保持連線活躍並檢測客戶端是否仍在線。
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -190,8 +171,9 @@ func (h *Hub) Run() {
 				log.Printf("Client unregistered. Total clients: %d, By UserID: %d", len(h.clients), len(h.clientsByUserID))
 			}
 		case message := <-h.broadcast:
+			// 檢查 RecipientID 不為空
 			if message.RecipientID != primitive.NilObjectID {
-				// 一對一訊息：發送給特定接收者
+				// 檢查接收者是否登入
 				if recipientClient, ok := h.clientsByUserID[message.RecipientID]; ok {
 
 					select {
@@ -203,14 +185,16 @@ func (h *Hub) Run() {
 						log.Printf("Recipient client channel is full, unregistered client %s", recipientClient.UserID.Hex())
 					}
 				} else {
+					// 顯示接收者未登入
 					log.Printf("Recipient %s not found for private message.", message.RecipientID.Hex())
 				}
-				// ====== 新增：將訊息發送回給發送者 (即自己) ======
+				// 將訊息發送回給發送者自己
+				// 檢查發送者是否登入
 				if senderClient, ok := h.clientsByUserID[message.SenderID]; ok { //
 					// 確保發送者不是接收者本人 (避免重複發送給同一個人，雖然不影響功能)
 					if senderClient.UserID != message.RecipientID { //
 						select { //
-						case senderClient.send <- message: //
+						case senderClient.send <- message: 
 						default: //
 							close(senderClient.send)                                                                                      //
 							delete(h.clients, senderClient)                                                                               //

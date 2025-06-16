@@ -82,6 +82,7 @@ func InsertMessage(message models.Message) (*mongo.InsertOneResult, error) {
 	return result, nil
 }
 
+
 // 獲取指定數量的歷史訊息
 func GetMessages(limit int64) ([]interface{}, error) {
 	collection := GetCollection("messages")
