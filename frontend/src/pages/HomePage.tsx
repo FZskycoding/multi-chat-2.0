@@ -177,9 +177,41 @@ function HomePage() {
     navigate("/auth");
   };
 
-  const startChat = (user: User) => {
+  // 獲取歷史聊天記錄
+  const fetchChatHistory = async (user1Id: string, user2Id: string) => {
+    try {
+      const response = await fetch(`http://localhost:8080/chat-history?user1Id=${user1Id}&user2Id=${user2Id}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch chat history');
+      }
+      const data = await response.json();
+      return data.messages;
+    } catch (error) {
+      console.error('Error fetching chat history:', error);
+      notifications.show({
+        title: "錯誤",
+        message: "無法獲取聊天記錄",
+        color: "red",
+      });
+      return [];
+    }
+  };
+
+  const startChat = async (user: User) => {
     setSelectedUser(user);
-    // 不再清空訊息列表，而是根據 selectedUser 篩選顯示
+    
+    // 獲取歷史聊天記錄
+    if (userSession) {
+      const messages = await fetchChatHistory(userSession.id, user.id);
+      
+      // 更新訊息列表
+      setMessages(prevMessagesMap => {
+        const newMap = new Map(prevMessagesMap);
+        newMap.set(user.id, messages);
+        return newMap;
+      });
+    }
+
     notifications.show({
       title: "進入聊天室",
       message: `你已進入與 ${user.username} 的聊天室`,

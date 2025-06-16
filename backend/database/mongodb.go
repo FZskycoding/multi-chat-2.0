@@ -35,13 +35,12 @@ func ConnectMongoDB(uri, name string) {
 
 	log.Println("Connected to MongoDB successfully!")
 	MongoClient = client
-	dbName = name 
+	dbName = name
 
-	
 	messagesCollection := MongoClient.Database(dbName).Collection("messages")
 	// 設定規則:自動清理超過30分鐘的訊息
 	indexModel := mongo.IndexModel{
-		Keys:    bson.D{{Key: "timestamp", Value: 1}}, // value:1代表升序(由舊到新)
+		Keys:    bson.D{{Key: "timestamp", Value: 1}},        // value:1代表升序(由舊到新)
 		Options: options.Index().SetExpireAfterSeconds(1800), // 設定 30 分鐘 (1800 秒) 後過期
 	}
 
@@ -81,7 +80,6 @@ func InsertMessage(message models.Message) (*mongo.InsertOneResult, error) {
 	log.Printf("Message inserted with ID: %v", result.InsertedID)
 	return result, nil
 }
-
 
 // 獲取指定數量的歷史訊息
 func GetMessages(limit int64) ([]interface{}, error) {
@@ -129,6 +127,48 @@ func GetUnreadMessages(recipientID primitive.ObjectID) ([]models.Message, error)
 		log.Printf("Error decoding unread messages: %v", err)
 		return nil, err
 	}
+	return messages, nil
+}
+
+// GetChatHistory 獲取兩個用戶之間的聊天記錄
+func GetChatHistory(user1ID, user2ID primitive.ObjectID) ([]models.Message, error) {
+	collection := GetCollection("messages")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 構建查詢條件：找出兩個用戶之間的所有訊息
+	filter := bson.M{
+		"$or": []bson.M{
+			{
+				// 用戶1發送給用戶2的訊息
+				"senderId":    user1ID,
+				"recipientId": user2ID,
+			},
+			{
+				// 用戶2發送給用戶1的訊息
+				"senderId":    user2ID,
+				"recipientId": user1ID,
+			},
+		},
+	}
+
+	// 按時間戳升序排列
+	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: 1}})
+
+	cursor, err := collection.Find(ctx, filter, findOptions)
+	if err != nil {
+		log.Printf("Error finding chat history between users %s and %s: %v",
+			user1ID.Hex(), user2ID.Hex(), err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var messages []models.Message
+	if err = cursor.All(ctx, &messages); err != nil {
+		log.Printf("Error decoding chat history: %v", err)
+		return nil, err
+	}
+
 	return messages, nil
 }
 
