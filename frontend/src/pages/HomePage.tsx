@@ -95,6 +95,7 @@ function HomePage() {
     //然後把這則訊息加到正確的「對話記錄」裡面
     newWs.onmessage = (event) => {
       const receivedMessage: Message = JSON.parse(event.data);
+      console.log("receivedMessage: ",receivedMessage);
       setMessages((prevMessagesMap) => {
         const newMap = new Map(prevMessagesMap);
         const currentUserId = userSession!.id;
