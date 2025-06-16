@@ -1,17 +1,65 @@
 package websocket
 
 import (
-	"encoding/json"
-	"log"
-	"net/http"
-	"time"
+"encoding/json"
+"log"
+"net/http"
+"time"
 
-	"go-chat/backend/database" // 引入 database 套件
-	"go-chat/backend/models"   // 引入 models 套件
+"go-chat/backend/database" // 引入 database 套件
+"go-chat/backend/models"   // 引入 models 套件
 
-	"github.com/gorilla/websocket"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+"github.com/gorilla/websocket"
+"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+// ChatHistoryResponse 代表聊天記錄的回應結構
+type ChatHistoryResponse struct {
+    Messages []models.Message `json:"messages"`
+    Error    string          `json:"error,omitempty"`
+}
+
+// HandleChatHistory 處理獲取聊天記錄的請求
+func HandleChatHistory(w http.ResponseWriter, r *http.Request) {
+    // 從 URL 查詢參數獲取用戶 ID
+    user1IDStr := r.URL.Query().Get("user1Id")
+    user2IDStr := r.URL.Query().Get("user2Id")
+
+    if user1IDStr == "" || user2IDStr == "" {
+        http.Error(w, "Both user IDs are required", http.StatusBadRequest)
+        return
+    }
+
+    // 轉換字符串ID為ObjectID
+    user1ID, err := primitive.ObjectIDFromHex(user1IDStr)
+    if err != nil {
+        http.Error(w, "Invalid user1Id format", http.StatusBadRequest)
+        return
+    }
+
+    user2ID, err := primitive.ObjectIDFromHex(user2IDStr)
+    if err != nil {
+        http.Error(w, "Invalid user2Id format", http.StatusBadRequest)
+        return
+    }
+
+    // 獲取聊天記錄
+    messages, err := database.GetChatHistory(user1ID, user2ID)
+    if err != nil {
+        log.Printf("Error getting chat history: %v", err)
+        http.Error(w, "Internal server error", http.StatusInternalServerError)
+        return
+    }
+
+    // 設置響應頭
+    w.Header().Set("Content-Type", "application/json")
+
+    // 返回聊天記錄
+    response := ChatHistoryResponse{
+        Messages: messages,
+    }
+    json.NewEncoder(w).Encode(response)
+}
 
 const (
 	// 將訊息寫入到遠端對等點的最長時間
