@@ -83,13 +83,17 @@ func (c *Client) readPump() {
 		msg.SenderUsername = c.Username
 		msg.Timestamp = time.Now()
 
-		// 將訊息儲存到資料庫
-		if _, err := database.InsertMessage(msg); err != nil {
+		// 將訊息儲存到資料庫並獲得結果
+		result, err := database.InsertMessage(msg)
+		if err != nil {
 			log.Printf("Error saving message to database: %v", err)
-			// 即使儲存失敗，也嘗試廣播，但生產環境中應有更嚴格的錯誤處理
+			return
 		}
 
-		// 將收到的訊息廣播給所有客戶端
+		// 設置訊息的 ID 為資料庫生成的 ID
+		msg.ID = result.InsertedID.(primitive.ObjectID)
+
+		// 將包含 ID 的訊息廣播給所有客戶端
 		c.hub.broadcast <- msg
 	}
 }
@@ -189,6 +193,7 @@ func (h *Hub) Run() {
 			if message.RecipientID != primitive.NilObjectID {
 				// 一對一訊息：發送給特定接收者
 				if recipientClient, ok := h.clientsByUserID[message.RecipientID]; ok {
+
 					select {
 					case recipientClient.send <- message:
 					default:
@@ -199,6 +204,22 @@ func (h *Hub) Run() {
 					}
 				} else {
 					log.Printf("Recipient %s not found for private message.", message.RecipientID.Hex())
+				}
+				// ====== 新增：將訊息發送回給發送者 (即自己) ======
+				if senderClient, ok := h.clientsByUserID[message.SenderID]; ok { //
+					// 確保發送者不是接收者本人 (避免重複發送給同一個人，雖然不影響功能)
+					if senderClient.UserID != message.RecipientID { //
+						select { //
+						case senderClient.send <- message: //
+						default: //
+							close(senderClient.send)                                                                                      //
+							delete(h.clients, senderClient)                                                                               //
+							delete(h.clientsByUserID, senderClient.UserID)                                                                //
+							log.Printf("Sender client channel is full, unregistered client %s (self-receipt)", senderClient.UserID.Hex()) //
+						}
+					}
+				} else { //
+					log.Printf("Sender %s not found for self-receipt (可能是剛離線).", message.SenderID.Hex()) //
 				}
 			} else {
 				// 廣播訊息：發送給所有客戶端
