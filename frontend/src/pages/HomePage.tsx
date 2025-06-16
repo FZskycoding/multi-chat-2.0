@@ -95,22 +95,22 @@ function HomePage() {
     //然後把這則訊息加到正確的「對話記錄」裡面
     newWs.onmessage = (event) => {
       const receivedMessage: Message = JSON.parse(event.data);
-      console.log("收到訊息:", receivedMessage);
-
       setMessages((prevMessagesMap) => {
         const newMap = new Map(prevMessagesMap);
         const currentUserId = userSession!.id;
 
-        // 判斷訊息是發送給誰的，或者誰發送的
+        // 判斷使用者正在和誰聊天，chatPartnerId為對方的id
+        // 收到訊息時：chatPartnerId = 發送者的ID
+        // 發送訊息時：chatPartnerId = 接收者的ID
         let chatPartnerId: string | null = null;
 
-        // 如果訊息有明確的接收者且是當前使用者
         if (receivedMessage.recipientId === currentUserId) {
           chatPartnerId = receivedMessage.senderId;
-        }
-        // 如果訊息是當前使用者發送的
-        else if (receivedMessage.senderId === currentUserId) {
-          chatPartnerId = receivedMessage.recipientId || null; // 如果是廣播訊息，這裡可能為空
+        } else if (
+          receivedMessage.senderId === currentUserId &&
+          receivedMessage.recipientId //（確保接收者不是undefined）
+        ) {
+          chatPartnerId = receivedMessage.recipientId;
         }
         // 如果訊息沒有明確的接收者，且不是當前使用者發送的，則可能是廣播訊息
         // 或者其他不相關的訊息，這裡我們暫時忽略
@@ -122,14 +122,16 @@ function HomePage() {
 
         if (chatPartnerId) {
           const existingMessages = newMap.get(chatPartnerId) || [];
-          // 避免重複添加訊息，特別是歷史訊息在連線時會一次性發送
+          // 避免因為網路的關係重複添加訊息(檢查訊息id)
           const isDuplicate = existingMessages.some(
             (msg) => msg.id === receivedMessage.id
           );
+          // 如果沒有重複訊息id的話
           if (!isDuplicate) {
             newMap.set(chatPartnerId, [...existingMessages, receivedMessage]);
           }
         }
+        console.log("更新後的 messages Map:", newMap);
         return newMap;
       });
     };
@@ -193,7 +195,6 @@ function HomePage() {
     });
   };
 
-
   // 使用者發送訊息
   const handleSendMessage = () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -219,25 +220,8 @@ function HomePage() {
       messageToSend.recipientId = selectedUser.id;
     }
 
+    // 發送訊息到後端，後端會儲存並廣播回來
     ws.send(JSON.stringify(messageToSend));
-
-    // 手動將自己發送的訊息添加到訊息列表中，以便立即顯示
-    // 注意：這裡的 timestamp 應該與後端生成的一致，但前端先用當前時間顯示
-    const selfMessage: Message = {
-      //使用"!"告訴程式碼變數不會是 null 或 undefined
-      senderId: userSession!.id,
-      senderUsername: userSession!.username,
-      recipientId: selectedUser?.id, // 如果有接收者
-      content: messageInput,
-      timestamp: new Date().toISOString(), // 使用 ISO 格式
-    };
-    setMessages((prevMessagesMap) => {
-      const newMap = new Map(prevMessagesMap);
-      const chatPartnerId = selectedUser?.id || ""; // 如果是廣播訊息，這裡可能為空
-      const existingMessages = newMap.get(chatPartnerId) || [];
-      newMap.set(chatPartnerId, [...existingMessages, selfMessage]);
-      return newMap;
-    });
 
     setMessageInput(""); // 清空輸入框
   };
