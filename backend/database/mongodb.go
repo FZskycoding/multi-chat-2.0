@@ -77,33 +77,32 @@ func InsertMessage(message models.Message) (*mongo.InsertOneResult, error) {
 		log.Printf("Error inserting message: %v", err)
 		return nil, err
 	}
-	log.Printf("Message inserted with ID: %v", result.InsertedID)
 	return result, nil
 }
 
 // 獲取指定數量的歷史訊息
-func GetMessages(limit int64) ([]interface{}, error) {
-	collection := GetCollection("messages")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func GetMessages(limit int64) ([]models.Message, error) {
+    collection := GetCollection("messages")
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
 
-	// 設定查詢條件，value:-1代表降序(由新到舊)
-	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(limit)
+    // 設定查詢條件，value:-1代表降序(由新到舊)
+    findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(limit)
 
-	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
-	if err != nil {
-		log.Printf("Error finding messages: %v", err)
-		return nil, err
-	}
-	defer cursor.Close(ctx)
+    cursor, err := collection.Find(ctx, bson.M{}, findOptions)
+    if err != nil {
+        log.Printf("Error finding messages: %v", err)
+        return nil, err
+    }
+    defer cursor.Close(ctx)
 
-	// 將資料全部讀出來並放入陣列 messages，然後return出去
-	var messages []interface{}
-	if err = cursor.All(ctx, &messages); err != nil {
-		log.Printf("Error decoding messages: %v", err)
-		return nil, err
-	}
-	return messages, nil
+    // 直接解碼為 models.Message 切片
+    var messages []models.Message
+    if err = cursor.All(ctx, &messages); err != nil {
+        log.Printf("Error decoding messages: %v", err)
+        return nil, err
+    }
+    return messages, nil
 }
 
 // GetUnreadMessages 獲取特定使用者所有未讀的訊息

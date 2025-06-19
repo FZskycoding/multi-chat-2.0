@@ -1,64 +1,65 @@
 package websocket
 
 import (
-"encoding/json"
-"log"
-"net/http"
-"time"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
 
-"go-chat/backend/database" // 引入 database 套件
-"go-chat/backend/models"   // 引入 models 套件
+	"go-chat/backend/database" // 引入 database 套件
+	"go-chat/backend/models"   // 引入 models 套件
 
-"github.com/gorilla/websocket"
-"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/gorilla/websocket"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // ChatHistoryResponse 代表聊天記錄的回應結構
 type ChatHistoryResponse struct {
-    Messages []models.Message `json:"messages"`
-    Error    string          `json:"error,omitempty"`
+	Messages []models.Message `json:"messages"`
+	Error    string           `json:"error,omitempty"`
 }
 
 // HandleChatHistory 處理獲取聊天記錄的請求
 func HandleChatHistory(w http.ResponseWriter, r *http.Request) {
-    // 從 URL 查詢參數獲取用戶 ID
-    user1IDStr := r.URL.Query().Get("user1Id")
-    user2IDStr := r.URL.Query().Get("user2Id")
+	// 從 URL 查詢參數提取用戶 ID
+	user1IDStr := r.URL.Query().Get("user1Id")
+	user2IDStr := r.URL.Query().Get("user2Id")
 
-    if user1IDStr == "" || user2IDStr == "" {
-        http.Error(w, "Both user IDs are required", http.StatusBadRequest)
-        return
-    }
+	if user1IDStr == "" || user2IDStr == "" {
+		http.Error(w, "Both user IDs are required", http.StatusBadRequest)
+		return
+	}
 
-    // 轉換字符串ID為ObjectID
-    user1ID, err := primitive.ObjectIDFromHex(user1IDStr)
-    if err != nil {
-        http.Error(w, "Invalid user1Id format", http.StatusBadRequest)
-        return
-    }
+	// 轉換字符串ID為ObjectID
+	user1ID, err := primitive.ObjectIDFromHex(user1IDStr)
+	if err != nil {
+		http.Error(w, "Invalid user1Id format", http.StatusBadRequest)
+		return
+	}
 
-    user2ID, err := primitive.ObjectIDFromHex(user2IDStr)
-    if err != nil {
-        http.Error(w, "Invalid user2Id format", http.StatusBadRequest)
-        return
-    }
+	user2ID, err := primitive.ObjectIDFromHex(user2IDStr)
+	if err != nil {
+		http.Error(w, "Invalid user2Id format", http.StatusBadRequest)
+		return
+	}
 
-    // 獲取聊天記錄
-    messages, err := database.GetChatHistory(user1ID, user2ID)
-    if err != nil {
-        log.Printf("Error getting chat history: %v", err)
-        http.Error(w, "Internal server error", http.StatusInternalServerError)
-        return
-    }
+	// 獲取聊天記錄
+	messages, err := database.GetChatHistory(user1ID, user2ID)
+	if err != nil {
+		log.Printf("Error getting chat history: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 
-    // 設置響應頭
-    w.Header().Set("Content-Type", "application/json")
+	// 設置響應頭
+	w.Header().Set("Content-Type", "application/json")
 
-    // 返回聊天記錄
-    response := ChatHistoryResponse{
-        Messages: messages,
-    }
-    json.NewEncoder(w).Encode(response)
+	// 返回聊天記錄
+	response := ChatHistoryResponse{
+		Messages: messages,
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 const (
@@ -159,15 +160,14 @@ func (c *Client) writePump() {
 				return
 			}
 
-			// 將 models.Message 轉換為 JSON 格式發送
+			// 將 models.Message(struct結構) 轉換為 JSON 格式發送
 			jsonMessage, err := json.Marshal(message)
 			if err != nil {
 				log.Printf("Error marshalling message: %v", err)
 				return
 			}
 
-			// 直接寫入訊息，不檢查 channel 裡還有幾個訊息並將其合併
-			// 每次只發送一個 JSON 物件
+			//c.conn.WriteMessage(發送文字訊息, 發送內容)
 			if err := c.conn.WriteMessage(websocket.TextMessage, jsonMessage); err != nil {
 				log.Printf("Error writing message: %v", err)
 				return
@@ -186,8 +186,8 @@ func (c *Client) writePump() {
 // Hub 維護所有活躍的 WebSocket 客戶端，並處理訊息的廣播
 type Hub struct {
 	clients         map[*Client]bool
-	clientsByUserID map[primitive.ObjectID]*Client // 新增：按使用者ID索引的客戶端
-	broadcast       chan models.Message            // 類型改為 models.Message
+	clientsByUserID map[primitive.ObjectID]*Client // 按使用者ID索引的客戶端
+	broadcast       chan models.Message            
 	register        chan *Client
 	unregister      chan *Client
 }
@@ -207,14 +207,19 @@ func NewHub() *Hub {
 func (h *Hub) Run() {
 	for {
 		select {
+		// 一個新的 WebSocket 連線建立後，檢測到 h.register channel 有資料傳入
+		// 將這個新的 client 物件加入到 h.clients 這個 map 中
+		// 表示這個客戶端目前是活躍的
 		case client := <-h.register:
 			h.clients[client] = true
-			h.clientsByUserID[client.UserID] = client // 將客戶端加入按使用者ID索引的地圖
+			h.clientsByUserID[client.UserID] = client 
 			log.Printf("Client registered. Total clients: %d, By UserID: %d", len(h.clients), len(h.clientsByUserID))
+			fmt.Println(client)
+		// 當一個客戶端斷開 WebSocket 連線時
 		case client := <-h.unregister:
-			if _, ok := h.clients[client]; ok {
+			if _, ok := h.clients[client]; ok { //如果這個client真的存在，就從按使用者ID索引的地圖中移除
 				delete(h.clients, client)
-				delete(h.clientsByUserID, client.UserID) // 從按使用者ID索引的地圖中移除
+				delete(h.clientsByUserID, client.UserID) 
 				close(client.send)
 				log.Printf("Client unregistered. Total clients: %d, By UserID: %d", len(h.clients), len(h.clientsByUserID))
 			}
@@ -234,7 +239,7 @@ func (h *Hub) Run() {
 					}
 				} else {
 					// 顯示接收者未登入
-					log.Printf("Recipient %s not found for private message.", message.RecipientID.Hex())
+					log.Printf("Recipient %s is offline", message.RecipientID.Hex())
 				}
 				// 將訊息發送回給發送者自己
 				// 檢查發送者是否登入
@@ -242,7 +247,7 @@ func (h *Hub) Run() {
 					// 確保發送者不是接收者本人 (避免重複發送給同一個人，雖然不影響功能)
 					if senderClient.UserID != message.RecipientID { //
 						select { //
-						case senderClient.send <- message: 
+						case senderClient.send <- message:
 						default: //
 							close(senderClient.send)                                                                                      //
 							delete(h.clients, senderClient)                                                                               //
@@ -308,26 +313,21 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	// 在單獨的 goroutine 中發送歷史訊息
 	go func() {
 		// 獲取最近的 50 條歷史訊息
-		historicalMessages, err := database.GetMessages(50)
+		historicalMessages, err := database.GetMessages(10)
 		if err != nil {
 			log.Printf("Error getting historical messages: %v", err)
 			return
 		}
 
-		// 將歷史訊息發送給新連接的客戶端
-		for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
-			// 檢查是否符合models.Message的定義
-			if msg, ok := historicalMessages[i].(models.Message); ok {
-				select {
-				case client.send <- msg:
-				case <-time.After(time.Second): // 防止阻塞(如果訊息放入時等待超過1秒鐘就return)
-					log.Printf("Timeout sending historical message to client %s", client.UserID.Hex())
-					return
-				}
-			} else {
-				log.Printf("Failed to cast historical message to models.Message: %+v", historicalMessages[i])
-			}
-		}
+// 將歷史訊息發送給新連接的客戶端
+for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
+    select {
+    case client.send <- historicalMessages[i]:
+    case <-time.After(time.Second): // 防止阻塞(如果訊息放入時等待超過1秒鐘就return)
+        log.Printf("Timeout sending historical message to client %s", client.UserID.Hex())
+        return
+    }
+}
 
 		// 獲取並發送未讀訊息
 		unreadMessages, err := database.GetUnreadMessages(client.UserID)
@@ -339,11 +339,11 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 		var unreadMessageIDs []primitive.ObjectID
 		for _, msg := range unreadMessages {
 			select {
-			case client.send <- msg:
+			case client.send <- msg: //嘗試將訊息推送進 client.send channel
 				unreadMessageIDs = append(unreadMessageIDs, msg.ID)
-			case <-time.After(time.Second): // 防止阻塞
+				// fmt.Println(unreadMessageIDs)
+			case <-time.After(time.Second): // 如果在 1 秒內沒辦法把訊息送出去的狀況
 				log.Printf("Timeout sending unread message to client %s", client.UserID.Hex())
-				break // 跳出內層 select，繼續處理下一個未讀訊息
 			}
 		}
 

@@ -57,6 +57,7 @@ function HomePage() {
   const [messages, setMessages] = useState<Map<string, Message[]>>(new Map()); // 聊天訊息列表，按使用者ID分組
 
   const messagesEndRef = useRef<HTMLDivElement>(null); // 發送或接收訊息時，自動滾動到底部
+  const notificationShownRef = useRef(false);
 
   // 滾動到最新訊息
   const scrollToBottom = () => {
@@ -84,18 +85,23 @@ function HomePage() {
 
     newWs.onopen = () => {
       console.log("WebSocket 連線成功！");
-      notifications.show({
-        title: "連線成功",
-        message: "已成功連接到聊天伺服器。",
-        color: "green",
-      });
+      if (!notificationShownRef.current) {
+        // 只有當 notificationShownRef.current 為 false 時才顯示通知
+        notifications.show({
+          title: "連線成功",
+          message: "已成功連接到聊天伺服器。",
+          color: "green",
+          autoClose: 1500,
+        });
+        notificationShownRef.current = true; // 設置為 true，表示通知已顯示
+      }
     };
 
     //收到訊息的時候，會判斷這是誰傳來的
     //然後把這則訊息加到正確的「對話記錄」裡面
     newWs.onmessage = (event) => {
       const receivedMessage: Message = JSON.parse(event.data);
-      console.log("receivedMessage: ",receivedMessage);
+      console.log("receivedMessage: ", receivedMessage);
       setMessages((prevMessagesMap) => {
         const newMap = new Map(prevMessagesMap);
         const currentUserId = userSession!.id;
@@ -112,22 +118,20 @@ function HomePage() {
           receivedMessage.recipientId //（確保接收者不是undefined）
         ) {
           chatPartnerId = receivedMessage.recipientId;
-        }
-        // 如果訊息沒有明確的接收者，且不是當前使用者發送的，則可能是廣播訊息
-        // 或者其他不相關的訊息，這裡我們暫時忽略
-        else {
+        } else {
           // 如果是廣播訊息，可以考慮一個特殊的 chatPartnerId，例如 "broadcast"
           // 但目前我們的後端邏輯是針對一對一訊息的，所以這裡只處理有明確 senderId/recipientId 的情況
           return prevMessagesMap;
         }
 
         if (chatPartnerId) {
+          //獲取與聊天對象相關的所有現有訊息(包括自己)，如果沒有的話就用空陣列代替
           const existingMessages = newMap.get(chatPartnerId) || [];
           // 避免因為網路的關係重複添加訊息(檢查訊息id)
           const isDuplicate = existingMessages.some(
             (msg) => msg.id === receivedMessage.id
           );
-          // 如果沒有重複訊息id的話
+          // 如果不是重複訊息的話，就將訊息展開並加入列表
           if (!isDuplicate) {
             newMap.set(chatPartnerId, [...existingMessages, receivedMessage]);
           }
@@ -143,8 +147,10 @@ function HomePage() {
         title: "連線關閉",
         message: "與聊天伺服器的連線已斷開。",
         color: "orange",
+        autoClose: 1500,
       });
       setWs(null); // 清除 WebSocket 實例
+      notificationShownRef.current = false;
     };
 
     newWs.onerror = (error) => {
@@ -153,6 +159,7 @@ function HomePage() {
         title: "連線錯誤",
         message: "WebSocket 連線發生錯誤。",
         color: "red",
+        autoClose: 2000,
       });
     };
 
@@ -163,6 +170,7 @@ function HomePage() {
       if (newWs.readyState === WebSocket.OPEN) {
         newWs.close();
       }
+      notificationShownRef.current = false;
     };
   }, [userSession, navigate]);
 
@@ -180,32 +188,36 @@ function HomePage() {
   // 獲取歷史聊天記錄
   const fetchChatHistory = async (user1Id: string, user2Id: string) => {
     try {
-      const response = await fetch(`http://localhost:8080/chat-history?user1Id=${user1Id}&user2Id=${user2Id}`);
+      const response = await fetch(
+        `http://localhost:8080/chat-history?user1Id=${user1Id}&user2Id=${user2Id}`
+      );
       if (!response.ok) {
-        throw new Error('Failed to fetch chat history');
+        throw new Error("Failed to fetch chat history");
       }
       const data = await response.json();
       return data.messages;
     } catch (error) {
-      console.error('Error fetching chat history:', error);
+      console.error("Error fetching chat history:", error);
       notifications.show({
         title: "錯誤",
         message: "無法獲取聊天記錄",
         color: "red",
+        autoClose: 2000,
       });
       return [];
     }
   };
 
+  // 打開聊天室
   const startChat = async (user: User) => {
     setSelectedUser(user);
-    
+
     // 獲取歷史聊天記錄
     if (userSession) {
       const messages = await fetchChatHistory(userSession.id, user.id);
-      
+
       // 更新訊息列表
-      setMessages(prevMessagesMap => {
+      setMessages((prevMessagesMap) => {
         const newMap = new Map(prevMessagesMap);
         newMap.set(user.id, messages);
         return newMap;
@@ -216,15 +228,18 @@ function HomePage() {
       title: "進入聊天室",
       message: `你已進入與 ${user.username} 的聊天室`,
       color: "blue",
+      autoClose: 1500,
     });
   };
 
+  //關閉聊天室
   const exitChat = () => {
     setSelectedUser(null);
     notifications.show({
       title: "退出聊天室",
       message: "你已回到首頁",
       color: "blue",
+      autoClose: 1500,
     });
   };
 
@@ -235,6 +250,7 @@ function HomePage() {
         title: "連線錯誤",
         message: "WebSocket 未連線或已關閉，無法發送訊息。",
         color: "red",
+        autoClose: 2000,
       });
       return;
     }
