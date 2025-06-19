@@ -214,6 +214,7 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 			h.clientsByUserID[client.UserID] = client 
 			log.Printf("Client registered. Total clients: %d, By UserID: %d", len(h.clients), len(h.clientsByUserID))
+			fmt.Println(client)
 		// 當一個客戶端斷開 WebSocket 連線時
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok { //如果這個client真的存在，就從按使用者ID索引的地圖中移除
@@ -318,20 +319,15 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 將歷史訊息發送給新連接的客戶端
-		for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
-			// 檢查是否符合models.Message的定義
-			if msg, ok := historicalMessages[i].(models.Message); ok {
-				select {
-				case client.send <- msg:
-				case <-time.After(time.Second): // 防止阻塞(如果訊息放入時等待超過1秒鐘就return)
-					log.Printf("Timeout sending historical message to client %s", client.UserID.Hex())
-					return
-				}
-			} else {
-				log.Printf("Failed to cast historical message to models.Message: %+v", historicalMessages[i])
-			}
-		}
+// 將歷史訊息發送給新連接的客戶端
+for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
+    select {
+    case client.send <- historicalMessages[i]:
+    case <-time.After(time.Second): // 防止阻塞(如果訊息放入時等待超過1秒鐘就return)
+        log.Printf("Timeout sending historical message to client %s", client.UserID.Hex())
+        return
+    }
+}
 
 		// 獲取並發送未讀訊息
 		unreadMessages, err := database.GetUnreadMessages(client.UserID)
@@ -345,7 +341,7 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 			select {
 			case client.send <- msg: //嘗試將訊息推送進 client.send channel
 				unreadMessageIDs = append(unreadMessageIDs, msg.ID)
-				fmt.Println(unreadMessageIDs)
+				// fmt.Println(unreadMessageIDs)
 			case <-time.After(time.Second): // 如果在 1 秒內沒辦法把訊息送出去的狀況
 				log.Printf("Timeout sending unread message to client %s", client.UserID.Hex())
 			}
