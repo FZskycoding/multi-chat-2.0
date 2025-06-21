@@ -42,10 +42,11 @@ router.HandleFunc("/login", handlers.LoginUser).Methods("POST")
 // 新增：獲取所有使用者 API 路由
 router.HandleFunc("/users", handlers.GetAllUsers).Methods("GET") 
 
-// WebSocket 路由
+// WebSocket 相關路由
 router.HandleFunc("/ws", websocket.HandleConnections)
-// 聊天記錄路由
 router.HandleFunc("/chat-history", websocket.HandleChatHistory).Methods("GET")
+router.HandleFunc("/chat/invite", websocket.HandleInvitation).Methods("POST")
+router.HandleFunc("/chat/join", websocket.HandleJoinRoom).Methods("POST")
 
 // 設置 CORS 中介軟體
 // 允許來自任何來源的請求，並允許 POST, GET, OPTIONS 方法
