@@ -127,6 +127,21 @@ func (c *Client) readPump() {
 		msg.SenderUsername = c.Username
 		msg.Timestamp = time.Now()
 
+		// 如果類型未指定，則預設為聊天訊息
+		if msg.Type == "" {
+			msg.Type = models.MessageTypeChat
+		}
+
+		// 檢查是否為聊天室訊息
+		if msg.RoomID != primitive.NilObjectID {
+			// 檢查用戶是否為聊天室成員
+			if clients, ok := c.hub.roomClients[msg.RoomID]; !ok || !clients[c] {
+				log.Printf("User %s attempted to send message to room %s without being a member",
+					c.UserID.Hex(), msg.RoomID.Hex())
+				continue
+			}
+		}
+
 		// 將訊息儲存到資料庫並獲得結果
 		result, err := database.InsertMessage(msg)
 		if err != nil {
@@ -186,20 +201,81 @@ func (c *Client) writePump() {
 // Hub 維護所有活躍的 WebSocket 客戶端，並處理訊息的廣播
 type Hub struct {
 	clients         map[*Client]bool
-	clientsByUserID map[primitive.ObjectID]*Client // 新增：按使用者ID索引的客戶端
-	broadcast       chan models.Message            // 類型改為 models.Message
+	clientsByUserID map[primitive.ObjectID]*Client
+	roomClients     map[primitive.ObjectID]map[*Client]bool // 每個聊天室的客戶端列表
+	broadcast       chan models.Message
 	register        chan *Client
 	unregister      chan *Client
+	invitation      chan models.Invitation // 處理邀請的通道
 }
 
 // NewHub 創建並返回一個新的 Hub 實例
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:       make(chan models.Message), // 類型改為 models.Message
+		broadcast:       make(chan models.Message),
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
 		clients:         make(map[*Client]bool),
-		clientsByUserID: make(map[primitive.ObjectID]*Client), // 初始化
+		clientsByUserID: make(map[primitive.ObjectID]*Client),
+		roomClients:     make(map[primitive.ObjectID]map[*Client]bool),
+		invitation:      make(chan models.Invitation),
+	}
+}
+
+// JoinRoom 將客戶端加入聊天室
+func (h *Hub) JoinRoom(roomID primitive.ObjectID, client *Client) {
+	if _, ok := h.roomClients[roomID]; !ok {
+		h.roomClients[roomID] = make(map[*Client]bool)
+	}
+	h.roomClients[roomID][client] = true
+
+	// 發送系統消息通知其他成員
+	joinMessage := models.Message{
+		Type:           models.MessageTypeSystem,
+		RoomID:         roomID,
+		Content:        fmt.Sprintf("%s 已加入聊天室", client.Username),
+		Timestamp:      time.Now(),
+		SenderID:       client.UserID,
+		SenderUsername: "系統",
+	}
+
+	// 向聊天室內的所有成員廣播系統消息
+	for c := range h.roomClients[roomID] {
+		select {
+		case c.send <- joinMessage:
+		default:
+			close(c.send)
+			delete(h.roomClients[roomID], c)
+			delete(h.clients, c)
+			delete(h.clientsByUserID, c.UserID)
+		}
+	}
+}
+
+// LeaveRoom 將客戶端從聊天室移除
+func (h *Hub) LeaveRoom(roomID primitive.ObjectID, client *Client) {
+	if clients, ok := h.roomClients[roomID]; ok {
+		delete(clients, client)
+		// 如果聊天室沒有其他成員了，刪除這個聊天室的映射
+		if len(clients) == 0 {
+			delete(h.roomClients, roomID)
+		}
+	}
+}
+
+// BroadcastToRoom 向特定聊天室的所有成員廣播消息
+func (h *Hub) BroadcastToRoom(roomID primitive.ObjectID, message models.Message) {
+	if clients, ok := h.roomClients[roomID]; ok {
+		for client := range clients {
+			select {
+			case client.send <- message:
+			default:
+				close(client.send)
+				delete(clients, client)
+				delete(h.clients, client)
+				delete(h.clientsByUserID, client.UserID)
+			}
+		}
 	}
 }
 
@@ -207,69 +283,93 @@ func NewHub() *Hub {
 func (h *Hub) Run() {
 	for {
 		select {
-		// 一個新的 WebSocket 連線建立後，檢測到 h.register channel 有資料傳入
-		// 將這個新的 client 物件加入到 h.clients 這個 map 中
-		// 表示這個客戶端目前是活躍的
+		// 處理新客戶端註冊
 		case client := <-h.register:
 			h.clients[client] = true
-			h.clientsByUserID[client.UserID] = client 
-			log.Printf("Client registered. Total clients: %d, By UserID: %d", len(h.clients), len(h.clientsByUserID))
-			fmt.Println(client)
-		// 當一個客戶端斷開 WebSocket 連線時
-		case client := <-h.unregister:
-			if _, ok := h.clients[client]; ok { //如果這個client真的存在，就從按使用者ID索引的地圖中移除
-				delete(h.clients, client)
-				delete(h.clientsByUserID, client.UserID) 
-				close(client.send)
-				log.Printf("Client unregistered. Total clients: %d, By UserID: %d", len(h.clients), len(h.clientsByUserID))
-			}
-		case message := <-h.broadcast:
-			// 檢查 RecipientID 不為空
-			if message.RecipientID != primitive.NilObjectID {
-				// 檢查接收者是否登入
-				if recipientClient, ok := h.clientsByUserID[message.RecipientID]; ok {
+			h.clientsByUserID[client.UserID] = client
+			log.Printf("Client registered. Total clients: %d", len(h.clients))
 
+		// 處理用戶離線
+		case client := <-h.unregister:
+			if _, ok := h.clients[client]; ok {
+				// 從所有聊天室中移除該客戶端
+				for roomID := range h.roomClients {
+					h.LeaveRoom(roomID, client)
+				}
+				delete(h.clients, client)
+				delete(h.clientsByUserID, client.UserID)
+				close(client.send)
+				log.Printf("Client unregistered. Total clients: %d", len(h.clients))
+			}
+
+		// 處理訊息廣播
+		case message := <-h.broadcast:
+			if message.RecipientID != primitive.NilObjectID {
+				// 私人訊息處理
+				if recipientClient, ok := h.clientsByUserID[message.RecipientID]; ok {
 					select {
 					case recipientClient.send <- message:
 					default:
 						close(recipientClient.send)
 						delete(h.clients, recipientClient)
 						delete(h.clientsByUserID, recipientClient.UserID)
-						log.Printf("Recipient client channel is full, unregistered client %s", recipientClient.UserID.Hex())
 					}
-				} else {
-					// 顯示接收者未登入
-					log.Printf("Recipient %s not found for private message.", message.RecipientID.Hex())
 				}
-				// 將訊息發送回給發送者自己
-				// 檢查發送者是否登入
-				if senderClient, ok := h.clientsByUserID[message.SenderID]; ok { //
-					// 確保發送者不是接收者本人 (避免重複發送給同一個人，雖然不影響功能)
-					if senderClient.UserID != message.RecipientID { //
-						select { //
+
+				// 同時發送給發送者
+				if senderClient, ok := h.clientsByUserID[message.SenderID]; ok {
+					if senderClient.UserID != message.RecipientID {
+						select {
 						case senderClient.send <- message:
-						default: //
-							close(senderClient.send)                                                                                      //
-							delete(h.clients, senderClient)                                                                               //
-							delete(h.clientsByUserID, senderClient.UserID)                                                                //
-							log.Printf("Sender client channel is full, unregistered client %s (self-receipt)", senderClient.UserID.Hex()) //
+						default:
+							close(senderClient.send)
+							delete(h.clients, senderClient)
+							delete(h.clientsByUserID, senderClient.UserID)
 						}
 					}
-				} else { //
-					log.Printf("Sender %s not found for self-receipt (可能是剛離線).", message.SenderID.Hex()) //
+				}
+			} else if message.RoomID != primitive.NilObjectID {
+				// 聊天室訊息處理
+				// 所有聊天室消息直接廣播（包括系統消息）
+				h.BroadcastToRoom(message.RoomID, message)
+			} else {
+				log.Printf("Warning: Message without proper routing information received: %v", message)
+			}
+
+		// 處理邀請
+		case invitation := <-h.invitation:
+			// 創建邀請記錄
+			result, err := database.CreateInvitation(invitation)
+			if err != nil {
+				log.Printf("Error creating invitation: %v", err)
+				continue
+			}
+
+			// 儲存邀請 ID 供後續使用
+			invitationID := result.InsertedID.(primitive.ObjectID)
+			_ = invitationID // 暫時不使用，但保留以供將來擴展
+
+			// 向被邀請者發送邀請通知
+			if inviteeClient, ok := h.clientsByUserID[invitation.InviteeID]; ok {
+				inviteMessage := models.Message{
+					Type:           models.MessageTypeSystem,
+					Content:        fmt.Sprintf("您被邀請加入聊天室，請接受或拒絕"),
+					SenderID:       invitation.InviterID,
+					RecipientID:    invitation.InviteeID,
+					RoomID:         invitation.RoomID,
+					Timestamp:      time.Now(),
+					SenderUsername: "系統",
+				}
+
+				select {
+				case inviteeClient.send <- inviteMessage:
+				default:
+					close(inviteeClient.send)
+					delete(h.clients, inviteeClient)
+					delete(h.clientsByUserID, inviteeClient.UserID)
 				}
 			} else {
-				// 廣播訊息：發送給所有客戶端
-				for client := range h.clients {
-					select {
-					case client.send <- message:
-					default:
-						close(client.send)
-						delete(h.clients, client)
-						delete(h.clientsByUserID, client.UserID)
-						log.Printf("Client channel is full, unregistered client %s", client.UserID.Hex())
-					}
-				}
+				log.Printf("Invitee %s is offline", invitation.InviteeID.Hex())
 			}
 		}
 	}
@@ -278,7 +378,79 @@ func (h *Hub) Run() {
 // 全局 Hub 實例
 var GlobalHub = NewHub()
 
-// HandleConnections 處理 WebSocket 連線請求
+// HandleInvitation 處理聊天室邀請
+func HandleInvitation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var invitation models.Invitation
+	if err := json.NewDecoder(r.Body).Decode(&invitation); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	GlobalHub.invitation <- invitation
+	w.WriteHeader(http.StatusOK)
+}
+
+// HandleJoinRoom 處理加入聊天室請求
+func HandleJoinRoom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := r.URL.Query().Get("userId")
+	roomID := r.URL.Query().Get("roomId")
+	invitationID := r.URL.Query().Get("invitationId")
+
+	if userID == "" || roomID == "" || invitationID == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+		return
+	}
+
+	// 轉換 ID 為 ObjectID
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	roomObjID, err := primitive.ObjectIDFromHex(roomID)
+	if err != nil {
+		http.Error(w, "Invalid room ID", http.StatusBadRequest)
+		return
+	}
+
+	invitationObjID, err := primitive.ObjectIDFromHex(invitationID)
+	if err != nil {
+		http.Error(w, "Invalid invitation ID", http.StatusBadRequest)
+		return
+	}
+
+	// 更新邀請狀態
+	if err := database.UpdateInvitationStatus(invitationObjID, "accepted"); err != nil {
+		http.Error(w, "Failed to update invitation status", http.StatusInternalServerError)
+		return
+	}
+
+	// 將用戶加入聊天室
+	if err := database.AddMemberToChatRoom(roomObjID, userObjID); err != nil {
+		http.Error(w, "Failed to add member to chat room", http.StatusInternalServerError)
+		return
+	}
+
+	// 如果用戶已連線，將其加入聊天室的 WebSocket 連線
+	if client, ok := GlobalHub.clientsByUserID[userObjID]; ok {
+		GlobalHub.JoinRoom(roomObjID, client)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// 處理 WebSocket 連線請求
 func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	// 從 URL 查詢參數中獲取 UserID 和 Username
 	userIDStr := r.URL.Query().Get("userId")
@@ -304,7 +476,7 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		hub:      GlobalHub,
 		conn:     conn,
-		send:     make(chan models.Message, 256), // 類型改為 models.Message
+		send:     make(chan models.Message, 256),
 		UserID:   userID,
 		Username: username,
 	}
@@ -313,21 +485,21 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	// 在單獨的 goroutine 中發送歷史訊息
 	go func() {
 		// 獲取最近的 50 條歷史訊息
-		historicalMessages, err := database.GetMessages(10)
+		historicalMessages, err := database.GetMessages(50)
 		if err != nil {
 			log.Printf("Error getting historical messages: %v", err)
 			return
 		}
 
-// 將歷史訊息發送給新連接的客戶端
-for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
-    select {
-    case client.send <- historicalMessages[i]:
-    case <-time.After(time.Second): // 防止阻塞(如果訊息放入時等待超過1秒鐘就return)
-        log.Printf("Timeout sending historical message to client %s", client.UserID.Hex())
-        return
-    }
-}
+		// 將歷史訊息發送給新連接的客戶端
+		for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
+			select {
+			case client.send <- historicalMessages[i]:
+			case <-time.After(time.Second): // 防止阻塞(如果訊息放入時等待超過1秒鐘就return)
+				log.Printf("Timeout sending historical message to client %s", client.UserID.Hex())
+				return
+			}
+		}
 
 		// 獲取並發送未讀訊息
 		unreadMessages, err := database.GetUnreadMessages(client.UserID)

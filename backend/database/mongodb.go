@@ -37,15 +37,27 @@ func ConnectMongoDB(uri, name string) {
 	MongoClient = client
 	dbName = name
 
+	// 初始化訊息集合
 	messagesCollection := MongoClient.Database(dbName).Collection("messages")
-	// 設定規則:自動清理超過30分鐘的訊息
-	indexModel := mongo.IndexModel{
-		Keys:    bson.D{{Key: "timestamp", Value: 1}},        // value:1代表升序(由舊到新)
-		Options: options.Index().SetExpireAfterSeconds(1800), // 設定 30 分鐘 (1800 秒) 後過期
+	messageIndexModel := mongo.IndexModel{
+		Keys:    bson.D{{Key: "timestamp", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(1800), // 30分鐘後過期
 	}
+	_, err = messagesCollection.Indexes().CreateOne(ctx, messageIndexModel)
 
-	// 套用規則
-	_, err = messagesCollection.Indexes().CreateOne(ctx, indexModel)
+	// 初始化聊天室集合
+	roomsCollection := MongoClient.Database(dbName).Collection("chatrooms")
+	roomIndexModel := mongo.IndexModel{
+		Keys: bson.D{{Key: "createdAt", Value: 1}},
+	}
+	_, err = roomsCollection.Indexes().CreateOne(ctx, roomIndexModel)
+
+	// 初始化邀請集合
+	invitationsCollection := MongoClient.Database(dbName).Collection("invitations")
+	invitationIndexModel := mongo.IndexModel{
+		Keys: bson.D{{Key: "createdAt", Value: 1}},
+	}
+	_, err = invitationsCollection.Indexes().CreateOne(ctx, invitationIndexModel)
 	if err != nil {
 		log.Fatalf("Failed to create TTL index for messages collection: %v", err)
 	}
@@ -83,27 +95,27 @@ func InsertMessage(message models.Message) (*mongo.InsertOneResult, error) {
 
 // 獲取指定數量的歷史訊息
 func GetMessages(limit int64) ([]models.Message, error) {
-    collection := GetCollection("messages")
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
+	collection := GetCollection("messages")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    // 設定查詢條件，value:-1代表降序(由新到舊)
-    findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(limit)
+	// 設定查詢條件，value:-1代表降序(由新到舊)
+	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(limit)
 
-    cursor, err := collection.Find(ctx, bson.M{}, findOptions)
-    if err != nil {
-        log.Printf("Error finding messages: %v", err)
-        return nil, err
-    }
-    defer cursor.Close(ctx)
+	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
+	if err != nil {
+		log.Printf("Error finding messages: %v", err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
 
-    // 直接解碼為 models.Message 切片
-    var messages []models.Message
-    if err = cursor.All(ctx, &messages); err != nil {
-        log.Printf("Error decoding messages: %v", err)
-        return nil, err
-    }
-    return messages, nil
+	// 直接解碼為 models.Message 切片
+	var messages []models.Message
+	if err = cursor.All(ctx, &messages); err != nil {
+		log.Printf("Error decoding messages: %v", err)
+		return nil, err
+	}
+	return messages, nil
 }
 
 // GetUnreadMessages 獲取特定使用者所有未讀的訊息
@@ -130,29 +142,168 @@ func GetUnreadMessages(recipientID primitive.ObjectID) ([]models.Message, error)
 	return messages, nil
 }
 
+// CreateChatRoom 創建新的聊天室
+func CreateChatRoom(room models.ChatRoom) (*mongo.InsertOneResult, error) {
+	collection := GetCollection("chatrooms")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	room.CreatedAt = time.Now()
+	result, err := collection.InsertOne(ctx, room)
+	if err != nil {
+		log.Printf("Error creating chat room: %v", err)
+		return nil, err
+	}
+	return result, nil
+}
+
+// GetChatRoom 獲取聊天室信息
+func GetChatRoom(roomID primitive.ObjectID) (*models.ChatRoom, error) {
+	collection := GetCollection("chatrooms")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var room models.ChatRoom
+	err := collection.FindOne(ctx, bson.M{"_id": roomID}).Decode(&room)
+	if err != nil {
+		log.Printf("Error finding chat room: %v", err)
+		return nil, err
+	}
+	return &room, nil
+}
+
+// UpdateChatRoomName 更新聊天室名稱
+func UpdateChatRoomName(roomID primitive.ObjectID, newName string) error {
+	collection := GetCollection("chatrooms")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	update := bson.M{"$set": bson.M{"name": newName}}
+	_, err := collection.UpdateOne(ctx, bson.M{"_id": roomID}, update)
+	if err != nil {
+		log.Printf("Error updating chat room name: %v", err)
+		return err
+	}
+	return nil
+}
+
+// AddMemberToChatRoom 將新成員加入聊天室
+func AddMemberToChatRoom(roomID, memberID primitive.ObjectID) error {
+	collection := GetCollection("chatrooms")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	update := bson.M{"$addToSet": bson.M{"members": memberID}}
+	_, err := collection.UpdateOne(ctx, bson.M{"_id": roomID}, update)
+	if err != nil {
+		log.Printf("Error adding member to chat room: %v", err)
+		return err
+	}
+	return nil
+}
+
+// CreateInvitation 創建聊天室邀請
+func CreateInvitation(invitation models.Invitation) (*mongo.InsertOneResult, error) {
+	collection := GetCollection("invitations")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	invitation.CreatedAt = time.Now()
+	invitation.Status = "pending"
+	result, err := collection.InsertOne(ctx, invitation)
+	if err != nil {
+		log.Printf("Error creating invitation: %v", err)
+		return nil, err
+	}
+	return result, nil
+}
+
+// UpdateInvitationStatus 更新邀請狀態
+func UpdateInvitationStatus(invitationID primitive.ObjectID, status string) error {
+	collection := GetCollection("invitations")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	update := bson.M{"$set": bson.M{"status": status}}
+	_, err := collection.UpdateOne(ctx, bson.M{"_id": invitationID}, update)
+	if err != nil {
+		log.Printf("Error updating invitation status: %v", err)
+		return err
+	}
+	return nil
+}
+
+// GetPendingInvitations 獲取用戶的待處理邀請
+func GetPendingInvitations(inviteeID primitive.ObjectID) ([]models.Invitation, error) {
+	collection := GetCollection("invitations")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	filter := bson.M{
+		"inviteeId": inviteeID,
+		"status":    "pending",
+	}
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		log.Printf("Error finding pending invitations: %v", err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var invitations []models.Invitation
+	if err = cursor.All(ctx, &invitations); err != nil {
+		log.Printf("Error decoding invitations: %v", err)
+		return nil, err
+	}
+	return invitations, nil
+}
+
+// GetRoomMessages 獲取聊天室的訊息歷史
+func GetRoomMessages(roomID primitive.ObjectID) ([]models.Message, error) {
+	collection := GetCollection("messages")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	filter := bson.M{"roomId": roomID}
+	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: 1}})
+
+	cursor, err := collection.Find(ctx, filter, findOptions)
+	if err != nil {
+		log.Printf("Error finding room messages: %v", err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var messages []models.Message
+	if err = cursor.All(ctx, &messages); err != nil {
+		log.Printf("Error decoding messages: %v", err)
+		return nil, err
+	}
+	return messages, nil
+}
+
 // GetChatHistory 獲取兩個用戶之間的聊天記錄
 func GetChatHistory(user1ID, user2ID primitive.ObjectID) ([]models.Message, error) {
 	collection := GetCollection("messages")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 構建查詢條件：找出兩個用戶之間的所有訊息
+	// 構建查詢條件：找出兩個用戶之間的私聊訊息
 	filter := bson.M{
 		"$or": []bson.M{
 			{
-				// 用戶1發送給用戶2的訊息
 				"senderId":    user1ID,
 				"recipientId": user2ID,
+				"type":        models.MessageTypeChat,
 			},
 			{
-				// 用戶2發送給用戶1的訊息
 				"senderId":    user2ID,
 				"recipientId": user1ID,
+				"type":        models.MessageTypeChat,
 			},
 		},
 	}
 
-	// 按時間戳升序排列
 	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: 1}})
 
 	cursor, err := collection.Find(ctx, filter, findOptions)
