@@ -312,7 +312,7 @@ function HomePage() {
       <AppShell.Navbar p="md">
         <ScrollArea h="calc(100vh - var(--app-shell-header-height) - var(--app-shell-footer-height, 0px))">
           <Text size="lg" fw={600} mb="md">
-            所有使用者
+            選擇一位使用者1對1聊天
           </Text>
           <Divider mb="sm" />
           {allUsers.length === 0 ? (
@@ -457,6 +457,16 @@ function HomePage() {
             <Text c="dimmed" ta="center">
               從左側導航欄點擊一位使用者來進入聊天室。
             </Text>
+            <Group mt={40}>
+              <Button
+                variant="gradient"
+                gradient={{ from: 'indigo', to: 'cyan' }}
+                size="lg"
+                leftSection={<IconMessageCircle size={20} />}
+              >
+                建立多人聊天
+              </Button>
+            </Group>
             <IconMessageCircle
               size={100}
               color="var(--mantine-color-gray-4)"
