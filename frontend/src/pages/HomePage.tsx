@@ -30,6 +30,14 @@ import {
   IconPhoto, // 引入圖片圖示
 } from "@tabler/icons-react";
 
+interface ChatRoom {
+  id: string;
+  name: string;
+  creatorId: string;
+  participants: User[];
+  createdAt: string;
+}
+
 interface User {
   id: string;
   username: string;
@@ -50,7 +58,7 @@ function HomePage() {
   const navigate = useNavigate(); // 能夠導航到各個route
   const [userSession, setUserSession] = useState(getUserSession()); //檢查使用者有沒有登入過
   const [opened, { toggle }] = useDisclosure();
-  const [allUsers, setAllUsers] = useState<User[]>([]); //把網站上除了自己以外的使用者抓下來，讓你選擇要跟誰聊天。
+  const [allUsers, setAllUsers] = useState<User[]>([]); // 所有使用者列表
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null); // WebSocket 實例
   const [messageInput, setMessageInput] = useState(""); // 訊息輸入框內容
@@ -312,14 +320,42 @@ function HomePage() {
 
       <AppShell.Navbar p="md">
         <ScrollArea h="calc(100vh - var(--app-shell-header-height) - var(--app-shell-footer-height, 0px))">
-          <Text size="lg" fw={600} mb="md">
-            所有使用者
-          </Text>
-          <Divider mb="sm" />
-          {allUsers.length === 0 ? (
-            <Text c="dimmed">沒有其他使用者。</Text>
-          ) : (
-            <Stack>
+          <Stack gap="md">
+            <Button
+              fullWidth
+              variant="filled"
+              color="blue"
+              leftSection={<IconMessageCircle size={20} />}
+              onClick={() => {
+                notifications.show({
+                  title: "開發中",
+                  message: "建立聊天室功能正在開發中",
+                  color: "blue",
+                });
+              }}
+            >
+              建立新聊天室
+            </Button>
+
+            <div>
+              <Text size="lg" fw={600} mb="md">
+                聊天室列表
+              </Text>
+              <Divider mb="sm" />
+              <Text c="dimmed" size="sm" mb="md">
+                尚無聊天室
+              </Text>
+            </div>
+
+            <div>
+              <Text size="lg" fw={600} mb="md">
+                所有使用者
+              </Text>
+              <Divider mb="sm" />
+              {allUsers.length === 0 ? (
+                <Text c="dimmed">沒有其他使用者。</Text>
+              ) : (
+                <Stack gap="md">
               {allUsers.map((user) => (
                 <UnstyledButton
                   key={user.id}
@@ -343,8 +379,10 @@ function HomePage() {
                   </Text>
                 </UnstyledButton>
               ))}
-            </Stack>
-          )}
+                </Stack>
+              )}
+            </div>
+          </Stack>
         </ScrollArea>
       </AppShell.Navbar>
 
@@ -453,10 +491,10 @@ function HomePage() {
             }}
           >
             <Title order={2} ta="center" mb="md">
-              選擇一位使用者開始聊天
+              歡迎使用 GoChat
             </Title>
             <Text c="dimmed" ta="center">
-              從左側導航欄點擊一位使用者來進入聊天室。
+              您可以建立新的聊天室，或從左側選擇已有的聊天室來開始聊天。
             </Text>
             <IconMessageCircle
               size={100}
