@@ -3,6 +3,7 @@
 interface UserSession {
   id: string;
   username: string;
+  email?: string; // 新增 email 屬性
   // 可以根據需求添加其他資訊，例如 token
 }
 

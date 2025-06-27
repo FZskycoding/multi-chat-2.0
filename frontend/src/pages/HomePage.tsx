@@ -1,5 +1,5 @@
 // src/pages/HomePage.tsx
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AppShell,
@@ -15,19 +15,19 @@ import {
   Paper,
   Title,
   Stack,
-  TextInput, // 引入 TextInput
-  ActionIcon, // 引入 ActionIcon
+  TextInput,
+  ActionIcon,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { getUserSession, clearUserSession } from "../utils/auth";
-import { getAllUsers } from "../api/user"; // 引入 getAllUsers
+import { getAllUsers } from "../api/user";
 import {
   IconMessageCircle,
   IconLogout,
   IconUserCircle,
-  IconSend, // 引入發送圖示
-  IconPhoto, // 引入圖片圖示
+  IconSend,
+  IconPhoto,
 } from "@tabler/icons-react";
 
 interface ChatRoom {
@@ -41,7 +41,7 @@ interface ChatRoom {
 interface User {
   id: string;
   username: string;
-  email: string;
+  email?: string; // 將 email 設為可選
 }
 
 // 定義訊息類型，與後端 models.Message 保持一致
@@ -49,22 +49,24 @@ interface Message {
   id?: string; // 後端生成
   senderId: string;
   senderUsername: string;
-  recipientId?: string; // 可選，一對一聊天時使用
+  roomId: string; // 聊天室ID
+  roomName: string; // 聊天室名稱
   content: string;
   timestamp: string; // ISO 格式日期字串
 }
 
 function HomePage() {
-  const navigate = useNavigate(); // 能夠導航到各個route
-  const [userSession, setUserSession] = useState(getUserSession()); //檢查使用者有沒有登入過
+  const navigate = useNavigate();
+  const [userSession, setUserSession] = useState(getUserSession());
   const [opened, { toggle }] = useDisclosure();
-  const [allUsers, setAllUsers] = useState<User[]>([]); // 所有使用者列表
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [ws, setWs] = useState<WebSocket | null>(null); // WebSocket 實例
-  const [messageInput, setMessageInput] = useState(""); // 訊息輸入框內容
-  const [messages, setMessages] = useState<Map<string, Message[]>>(new Map()); // 聊天訊息列表，按使用者ID分組
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]); // 使用者已加入的聊天室列表
+  const [selectedRoom, setSelectedRoom] = useState<ChatRoom | null>(null);
+  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [messageInput, setMessageInput] = useState("");
+  const [messages, setMessages] = useState<Map<string, Message[]>>(new Map()); // 聊天訊息列表，按聊天室ID分組
 
-  const messagesEndRef = useRef<HTMLDivElement>(null); // 發送或接收訊息時，自動滾動到底部
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const notificationShownRef = useRef(false);
 
   // 滾動到最新訊息
@@ -72,120 +74,104 @@ function HomePage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // 獲取所有使用者列表
   useEffect(() => {
     if (!userSession) {
       navigate("/auth");
       return;
     }
 
-    // 獲取所有使用者列表
     const fetchAllUsers = async () => {
-      const users = await getAllUsers(); // 調用新的 API 函數
+      const users = await getAllUsers();
       if (userSession) {
-        setAllUsers(users.filter((u: User) => u.id !== userSession!.id)); // 使用非空斷言
+        setAllUsers(users.filter((u: User) => u.id !== userSession!.id));
       }
     };
     fetchAllUsers();
-
-    // 建立 WebSocket 連線
-    const websocketUrl = `ws://localhost:8080/ws?userId=${userSession.id}&username=${userSession.username}`;
-    const newWs = new WebSocket(websocketUrl);
-
-    newWs.onopen = () => {
-      console.log("WebSocket 連線成功！");
-      if (!notificationShownRef.current) {
-        // 只有當 notificationShownRef.current 為 false 時才顯示通知
-        notifications.show({
-          title: "連線成功",
-          message: "已成功連接到聊天伺服器。",
-          color: "green",
-          autoClose: 1500,
-        });
-        notificationShownRef.current = true; // 設置為 true，表示通知已顯示
-      }
-    };
-
-    //收到訊息的時候，會判斷這是誰傳來的
-    //然後把這則訊息加到正確的「對話記錄」裡面
-    newWs.onmessage = (event) => {
-      const receivedMessage: Message = JSON.parse(event.data);
-      console.log("receivedMessage: ", receivedMessage);
-      setMessages((prevMessagesMap) => {
-        const newMap = new Map(prevMessagesMap);
-        const currentUserId = userSession!.id;
-
-        // 判斷使用者正在和誰聊天，chatPartnerId為對方的id
-        // 收到訊息時：chatPartnerId = 發送者的ID
-        // 發送訊息時：chatPartnerId = 接收者的ID
-        let chatPartnerId: string | null = null;
-
-        if (receivedMessage.recipientId === currentUserId) {
-          chatPartnerId = receivedMessage.senderId;
-        } else if (
-          receivedMessage.senderId === currentUserId &&
-          receivedMessage.recipientId //（確保接收者不是undefined）
-        ) {
-          chatPartnerId = receivedMessage.recipientId;
-        } else {
-          // 如果是廣播訊息，可以考慮一個特殊的 chatPartnerId，例如 "broadcast"
-          // 但目前我們的後端邏輯是針對一對一訊息的，所以這裡只處理有明確 senderId/recipientId 的情況
-          return prevMessagesMap;
-        }
-
-        if (chatPartnerId) {
-          //獲取與聊天對象相關的所有現有訊息(包括自己)，如果沒有的話就用空陣列代替
-          const existingMessages = newMap.get(chatPartnerId) || [];
-          // 避免因為網路的關係重複添加訊息(檢查訊息id)
-          const isDuplicate = existingMessages.some(
-            (msg) => msg.id === receivedMessage.id
-          );
-          // 如果不是重複訊息的話，就將訊息展開並加入列表
-          if (!isDuplicate) {
-            newMap.set(chatPartnerId, [...existingMessages, receivedMessage]);
-          }
-        }
-        console.log("更新後的 messages Map:", newMap);
-        return newMap;
-      });
-    };
-
-    newWs.onclose = (event) => {
-      console.log("WebSocket 連線關閉:", event);
-      notifications.show({
-        title: "連線關閉",
-        message: "與聊天伺服器的連線已斷開。",
-        color: "orange",
-        autoClose: 1500,
-      });
-      setWs(null); // 清除 WebSocket 實例
-      notificationShownRef.current = false;
-    };
-
-    newWs.onerror = (error) => {
-      console.error("WebSocket 連線錯誤:", error);
-      notifications.show({
-        title: "連線錯誤",
-        message: "WebSocket 連線發生錯誤。",
-        color: "red",
-        autoClose: 2000,
-      });
-    };
-
-    setWs(newWs);
-
-    // 清理函數：組件卸載時關閉 WebSocket 連線
-    return () => {
-      if (newWs.readyState === WebSocket.OPEN) {
-        newWs.close();
-      }
-      notificationShownRef.current = false;
-    };
   }, [userSession, navigate]);
 
   // 訊息列表更新時滾動到底部
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // WebSocket 訊息處理
+  const handleWsMessage = useCallback((event: MessageEvent) => {
+    const receivedMessage: Message = JSON.parse(event.data);
+    console.log("receivedMessage: ", receivedMessage);
+    setMessages((prevMessagesMap) => {
+      const newMap = new Map(prevMessagesMap);
+      const roomMessages = newMap.get(receivedMessage.roomId) || [];
+      const isDuplicate = roomMessages.some(
+        (msg) => msg.id === receivedMessage.id
+      );
+
+      if (!isDuplicate) {
+        newMap.set(receivedMessage.roomId, [...roomMessages, receivedMessage]);
+      }
+      console.log("更新後的 messages Map:", newMap);
+      return newMap;
+    });
+  }, []);
+
+  // WebSocket 連線關閉處理
+  const handleWsClose = useCallback((event: CloseEvent) => {
+    console.log("WebSocket 連線關閉:", event);
+    notifications.show({
+      title: "連線關閉",
+      message: "與聊天伺服器的連線已斷開。",
+      color: "orange",
+      autoClose: 1500,
+    });
+    setWs(null);
+    notificationShownRef.current = false;
+  }, []);
+
+  // WebSocket 錯誤處理
+  const handleWsError = useCallback((error: Event) => {
+    console.error("WebSocket 連線錯誤:", error);
+    notifications.show({
+      title: "連線錯誤",
+      message: "WebSocket 連線發生錯誤。",
+      color: "red",
+      autoClose: 2000,
+    });
+  }, []);
+
+  // 建立 WebSocket 連線
+  const connectWebSocket = useCallback((roomId: string, roomName: string) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close(); // 關閉現有連線
+    }
+
+    const websocketUrl = `ws://localhost:8080/ws?userId=${userSession!.id}&username=${userSession!.username}&roomId=${roomId}&roomName=${encodeURIComponent(roomName)}`;
+    const newWs = new WebSocket(websocketUrl);
+
+    newWs.onopen = () => {
+      console.log("WebSocket 連線成功！");
+      if (!notificationShownRef.current) {
+        notifications.show({
+          title: "連線成功",
+          message: "已成功連接到聊天伺服器。",
+          color: "green",
+          autoClose: 1500,
+        });
+        notificationShownRef.current = true;
+      }
+    };
+    newWs.onmessage = handleWsMessage;
+    newWs.onclose = handleWsClose;
+    newWs.onerror = handleWsError;
+
+    setWs(newWs);
+
+    return () => {
+      if (newWs.readyState === WebSocket.OPEN) {
+        newWs.close();
+      }
+      notificationShownRef.current = false;
+    };
+  }, [userSession, ws, handleWsMessage, handleWsClose, handleWsError]);
 
   const handleLogout = () => {
     clearUserSession();
@@ -194,10 +180,10 @@ function HomePage() {
   };
 
   // 獲取歷史聊天記錄
-  const fetchChatHistory = async (user1Id: string, user2Id: string) => {
+  const fetchChatHistory = async (roomId: string) => {
     try {
       const response = await fetch(
-        `http://localhost:8080/chat-history?user1Id=${user1Id}&user2Id=${user2Id}`
+        `http://localhost:8080/chat-history?roomId=${roomId}`
       );
       if (!response.ok) {
         throw new Error("Failed to fetch chat history");
@@ -205,10 +191,10 @@ function HomePage() {
       const data = await response.json();
       return data.messages;
     } catch (error) {
-      console.error("Error fetching chat history:", error);
+      console.error(`Error fetching chat history for room ${roomId}:`, error);
       notifications.show({
         title: "錯誤",
-        message: "無法獲取聊天記錄",
+        message: `無法獲取聊天室 ${roomId} 的聊天記錄`,
         color: "red",
         autoClose: 2000,
       });
@@ -216,33 +202,62 @@ function HomePage() {
     }
   };
 
-  // 打開聊天室
-  const startChat = async (user: User) => {
-    setSelectedUser(user);
+  // 生成唯一的聊天室 ID (基於兩個使用者 ID)
+  const generateRoomId = (user1Id: string, user2Id: string): string => {
+    const sortedIds = [user1Id, user2Id].sort();
+    return `${sortedIds[0]}-${sortedIds[1]}`;
+  };
+
+  // 打開聊天室 (與特定使用者建立/加入聊天室)
+  const startChatWithUser = async (targetUser: User) => {
+    if (!userSession) return;
+
+    const roomId = generateRoomId(userSession.id, targetUser.id);
+    const roomName = `${userSession.username}、${targetUser.username} 的聊天室`;
+
+    let existingRoom = chatRooms.find((room) => room.id === roomId);
+
+    if (!existingRoom) {
+      // 如果聊天室不存在，則建立一個新的
+      const newRoom: ChatRoom = {
+        id: roomId,
+        name: roomName,
+        creatorId: userSession.id,
+        participants: [
+          { id: userSession.id, username: userSession.username, email: userSession.email || "" },
+          targetUser,
+        ],
+        createdAt: new Date().toISOString(),
+      };
+      setChatRooms((prev) => [...prev, newRoom]);
+      existingRoom = newRoom; // 將新建立的房間賦值給 existingRoom
+    }
+
+    setSelectedRoom(existingRoom); // 設定選中的聊天室
+    connectWebSocket(existingRoom.id, existingRoom.name); // 連接到該聊天室的 WebSocket
 
     // 獲取歷史聊天記錄
-    if (userSession) {
-      const messages = await fetchChatHistory(userSession.id, user.id);
-
-      // 更新訊息列表
-      setMessages((prevMessagesMap) => {
-        const newMap = new Map(prevMessagesMap);
-        newMap.set(user.id, messages);
-        return newMap;
-      });
-    }
+    const messages = await fetchChatHistory(existingRoom.id);
+    setMessages((prevMessagesMap) => {
+      const newMap = new Map(prevMessagesMap);
+      newMap.set(existingRoom.id, messages);
+      return newMap;
+    });
 
     notifications.show({
       title: "進入聊天室",
-      message: `你已進入與 ${user.username} 的聊天室`,
+      message: `你已進入聊天室：${existingRoom.name}`,
       color: "blue",
       autoClose: 1500,
     });
   };
 
-  //關閉聊天室
+  // 關閉聊天室
   const exitChat = () => {
-    setSelectedUser(null);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close(); // 關閉當前 WebSocket 連線
+    }
+    setSelectedRoom(null);
     notifications.show({
       title: "退出聊天室",
       message: "你已回到首頁",
@@ -263,24 +278,28 @@ function HomePage() {
       return;
     }
 
-    // 不發送空訊息
     if (messageInput.trim() === "") {
       return;
     }
 
+    if (!selectedRoom) {
+      notifications.show({
+        title: "錯誤",
+        message: "請先選擇一個聊天室。",
+        color: "red",
+        autoClose: 2000,
+      });
+      return;
+    }
+
     const messageToSend: Partial<Message> = {
+      roomId: selectedRoom.id,
+      roomName: selectedRoom.name,
       content: messageInput,
     };
 
-    // 如果有選中的聊天對象，則設定 recipientId
-    if (selectedUser) {
-      messageToSend.recipientId = selectedUser.id;
-    }
-
-    // 發送訊息到後端，後端會儲存並廣播回來
     ws.send(JSON.stringify(messageToSend));
-
-    setMessageInput(""); // 清空輸入框
+    setMessageInput("");
   };
 
   if (!userSession) {
@@ -321,30 +340,44 @@ function HomePage() {
       <AppShell.Navbar p="md">
         <ScrollArea h="calc(100vh - var(--app-shell-header-height) - var(--app-shell-footer-height, 0px))">
           <Stack gap="md">
-            <Button
-              fullWidth
-              variant="filled"
-              color="blue"
-              leftSection={<IconMessageCircle size={20} />}
-              onClick={() => {
-                notifications.show({
-                  title: "開發中",
-                  message: "建立聊天室功能正在開發中",
-                  color: "blue",
-                });
-              }}
-            >
-              建立新聊天室
-            </Button>
+            {/* 移除「建立新聊天室」按鈕，因為現在是點擊使用者建立 */}
 
             <div>
               <Text size="lg" fw={600} mb="md">
                 聊天室列表
               </Text>
               <Divider mb="sm" />
-              <Text c="dimmed" size="sm" mb="md">
-                尚無聊天室
-              </Text>
+              {chatRooms.length === 0 ? (
+                <Text c="dimmed" size="sm" mb="md">
+                  尚無聊天室。請從下方選擇使用者建立聊天室。
+                </Text>
+              ) : (
+                <Stack gap="md">
+                  {chatRooms.map((room) => (
+                    <UnstyledButton
+                      key={room.id}
+                      onClick={() => setSelectedRoom(room)} // 點擊已存在的聊天室
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        padding: rem(10),
+                        borderRadius: "var(--mantine-radius-sm)",
+                        backgroundColor:
+                          selectedRoom?.id === room.id
+                            ? "var(--mantine-color-blue-0)"
+                            : "transparent",
+                      }}
+                    >
+                      <Avatar color="blue" radius="xl">
+                        <IconMessageCircle size={24} />
+                      </Avatar>
+                      <Text ml="md" fw={500}>
+                        {room.name}
+                      </Text>
+                    </UnstyledButton>
+                  ))}
+                </Stack>
+              )}
             </div>
 
             <div>
@@ -356,29 +389,26 @@ function HomePage() {
                 <Text c="dimmed">沒有其他使用者。</Text>
               ) : (
                 <Stack gap="md">
-              {allUsers.map((user) => (
-                <UnstyledButton
-                  key={user.id}
-                  onClick={() => startChat(user)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    padding: rem(10),
-                    borderRadius: "var(--mantine-radius-sm)",
-                    backgroundColor:
-                      selectedUser?.id === user.id
-                        ? "var(--mantine-color-blue-0)"
-                        : "transparent",
-                  }}
-                >
-                  <Avatar color="blue" radius="xl">
-                    <IconUserCircle size={24} />
-                  </Avatar>
-                  <Text ml="md" fw={500}>
-                    {user.username}
-                  </Text>
-                </UnstyledButton>
-              ))}
+                  {allUsers.map((user) => (
+                    <UnstyledButton
+                      key={user.id}
+                      onClick={() => startChatWithUser(user)} // 點擊使用者建立/加入聊天室
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        padding: rem(10),
+                        borderRadius: "var(--mantine-radius-sm)",
+                        backgroundColor: "transparent",
+                      }}
+                    >
+                      <Avatar color="gray" radius="xl">
+                        <IconUserCircle size={24} />
+                      </Avatar>
+                      <Text ml="md" fw={500}>
+                        {user.username}
+                      </Text>
+                    </UnstyledButton>
+                  ))}
                 </Stack>
               )}
             </div>
@@ -387,7 +417,7 @@ function HomePage() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        {selectedUser ? (
+        {selectedRoom ? (
           // 聊天室介面
           <Paper
             p="md"
@@ -400,7 +430,7 @@ function HomePage() {
             }}
           >
             <Group justify="space-between" align="center" mb="md">
-              <Title order={3}>與 {selectedUser.username} 的聊天室</Title>
+              <Title order={3}>聊天室：{selectedRoom.name}</Title>
               <Button variant="light" color="red" onClick={exitChat}>
                 退出聊天室
               </Button>
@@ -409,8 +439,8 @@ function HomePage() {
             {/* 聊天訊息顯示區域 */}
             <ScrollArea style={{ flex: 1, marginBottom: rem(10) }}>
               <Stack>
-                {selectedUser &&
-                  messages.get(selectedUser.id)?.map((msg, index) => (
+                {selectedRoom &&
+                  messages.get(selectedRoom.id)?.map((msg, index) => (
                     <Group
                       key={index}
                       justify={
@@ -444,13 +474,12 @@ function HomePage() {
 
             {/* 訊息輸入框和發送按鈕 */}
             <Group wrap="nowrap" align="flex-end">
-              {/* 預留圖片上傳按鈕位置 */}
               <ActionIcon
                 size="xl"
                 variant="light"
                 color="gray"
                 aria-label="Upload Image"
-                disabled // 暫時禁用
+                disabled
               >
                 <IconPhoto size={24} />
               </ActionIcon>
@@ -461,7 +490,7 @@ function HomePage() {
                 onChange={(event) => setMessageInput(event.currentTarget.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault(); // 防止換行
+                    event.preventDefault();
                     handleSendMessage();
                   }
                 }}
@@ -477,7 +506,7 @@ function HomePage() {
             </Group>
           </Paper>
         ) : (
-          // 首頁內容 - 提示選擇使用者
+          // 首頁內容 - 提示選擇聊天室
           <Paper
             p="xl"
             shadow="sm"
@@ -494,7 +523,7 @@ function HomePage() {
               歡迎使用 GoChat
             </Title>
             <Text c="dimmed" ta="center">
-              您可以建立新的聊天室，或從左側選擇已有的聊天室來開始聊天。
+              您可以從左側選擇使用者來建立或加入聊天室。
             </Text>
             <IconMessageCircle
               size={100}

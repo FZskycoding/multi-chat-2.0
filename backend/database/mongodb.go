@@ -8,7 +8,6 @@ import (
 	"go-chat/backend/models" // 引入 models 套件
 
 	"go.mongodb.org/mongo-driver/bson" // 引入 bson 套件
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -80,113 +79,28 @@ func InsertMessage(message models.Message) (*mongo.InsertOneResult, error) {
 	return result, nil
 }
 
-// 獲取指定數量的歷史訊息
-func GetMessages(limit int64) ([]models.Message, error) {
-    collection := GetCollection("messages")
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-
-    // 設定查詢條件，value:-1代表降序(由新到舊)
-    findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(limit)
-
-    cursor, err := collection.Find(ctx, bson.M{}, findOptions)
-    if err != nil {
-        log.Printf("Error finding messages: %v", err)
-        return nil, err
-    }
-    defer cursor.Close(ctx)
-
-    // 直接解碼為 models.Message 切片
-    var messages []models.Message
-    if err = cursor.All(ctx, &messages); err != nil {
-        log.Printf("Error decoding messages: %v", err)
-        return nil, err
-    }
-    return messages, nil
-}
-
-// GetUnreadMessages 獲取特定使用者所有未讀的訊息
-func GetUnreadMessages(recipientID primitive.ObjectID) ([]models.Message, error) {
+// GetChatHistory 獲取指定聊天室的歷史訊息
+func GetChatHistory(roomID string) ([]models.Message, error) {
 	collection := GetCollection("messages")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	filter := bson.M{"recipientId": recipientID, "isRead": false}
-	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: 1}}) // 按時間戳升序排列
+	filter := bson.M{"roomId": roomID}
+	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: 1}}).SetLimit(50) // 獲取最近 50 條訊息
 
 	cursor, err := collection.Find(ctx, filter, findOptions)
 	if err != nil {
-		log.Printf("Error finding unread messages for recipient %s: %v", recipientID.Hex(), err)
+		log.Printf("Error finding chat history for room %s: %v", roomID, err)
 		return nil, err
 	}
 	defer cursor.Close(ctx)
 
 	var messages []models.Message
 	if err = cursor.All(ctx, &messages); err != nil {
-		log.Printf("Error decoding unread messages: %v", err)
+		log.Printf("Error decoding chat history for room %s: %v", roomID, err)
 		return nil, err
 	}
 	return messages, nil
-}
-
-// GetChatHistory 獲取兩個用戶之間的聊天記錄
-func GetChatHistory(user1ID, user2ID primitive.ObjectID) ([]models.Message, error) {
-	collection := GetCollection("messages")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// 構建查詢條件：找出兩個用戶之間的所有訊息
-	filter := bson.M{
-		"$or": []bson.M{
-			{
-				// 用戶1發送給用戶2的訊息
-				"senderId":    user1ID,
-				"recipientId": user2ID,
-			},
-			{
-				// 用戶2發送給用戶1的訊息
-				"senderId":    user2ID,
-				"recipientId": user1ID,
-			},
-		},
-	}
-
-	// 按時間戳升序排列
-	findOptions := options.Find().SetSort(bson.D{{Key: "timestamp", Value: 1}})
-
-	cursor, err := collection.Find(ctx, filter, findOptions)
-	if err != nil {
-		log.Printf("Error finding chat history between users %s and %s: %v",
-			user1ID.Hex(), user2ID.Hex(), err)
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-
-	var messages []models.Message
-	if err = cursor.All(ctx, &messages); err != nil {
-		log.Printf("Error decoding chat history: %v", err)
-		return nil, err
-	}
-
-	return messages, nil
-}
-
-// MarkMessagesAsRead 將特定訊息標記為已讀
-func MarkMessagesAsRead(messageIDs []primitive.ObjectID) (*mongo.UpdateResult, error) {
-	collection := GetCollection("messages")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	filter := bson.M{"_id": bson.M{"$in": messageIDs}}
-	update := bson.M{"$set": bson.M{"isRead": true}}
-
-	result, err := collection.UpdateMany(ctx, filter, update)
-	if err != nil {
-		log.Printf("Error marking messages as read: %v", err)
-		return nil, err
-	}
-	log.Printf("Marked %d messages as read.", result.ModifiedCount)
-	return result, nil
 }
 
 // DisconnectMongoDB 關閉 MongoDB 連線
