@@ -220,6 +220,7 @@ func (h *Hub) Run() {
 		case message := <-h.broadcast:
 			// 廣播訊息到特定聊天室
 			if clientsInRoom, ok := h.clientsByRoom[message.RoomID]; ok {
+				// 針對聊天室內每一個用戶進行廣播
 				for client := range clientsInRoom {
 					select {
 					case client.send <- message:

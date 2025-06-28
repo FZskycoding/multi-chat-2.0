@@ -98,7 +98,7 @@ function HomePage() {
   // WebSocket 訊息處理
   const handleWsMessage = useCallback((event: MessageEvent) => {
     const receivedMessage: Message = JSON.parse(event.data);
-    console.log("receivedMessage: ", receivedMessage);
+    // console.log("receivedMessage: ", receivedMessage);
     setMessages((prevMessagesMap) => {
       const newMap = new Map(prevMessagesMap);
       const roomMessages = newMap.get(receivedMessage.roomId) || [];
@@ -109,7 +109,7 @@ function HomePage() {
       if (!isDuplicate) {
         newMap.set(receivedMessage.roomId, [...roomMessages, receivedMessage]);
       }
-      console.log("更新後的 messages Map:", newMap);
+      // console.log("更新後的 messages Map:", newMap);
       return newMap;
     });
   }, []);
@@ -139,39 +139,46 @@ function HomePage() {
   }, []);
 
   // 建立 WebSocket 連線
-  const connectWebSocket = useCallback((roomId: string, roomName: string) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.close(); // 關閉現有連線
-    }
-
-    const websocketUrl = `ws://localhost:8080/ws?userId=${userSession!.id}&username=${userSession!.username}&roomId=${roomId}&roomName=${encodeURIComponent(roomName)}`;
-    const newWs = new WebSocket(websocketUrl);
-
-    newWs.onopen = () => {
-      console.log("WebSocket 連線成功！");
-      if (!notificationShownRef.current) {
-        notifications.show({
-          title: "連線成功",
-          message: "已成功連接到聊天伺服器。",
-          color: "green",
-          autoClose: 1500,
-        });
-        notificationShownRef.current = true;
+  const connectWebSocket = useCallback(
+    (roomId: string, roomName: string) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close(); // 關閉現有連線
       }
-    };
-    newWs.onmessage = handleWsMessage;
-    newWs.onclose = handleWsClose;
-    newWs.onerror = handleWsError;
 
-    setWs(newWs);
+      const websocketUrl = `ws://localhost:8080/ws?userId=${
+        userSession!.id
+      }&username=${
+        userSession!.username
+      }&roomId=${roomId}&roomName=${encodeURIComponent(roomName)}`;
+      const newWs = new WebSocket(websocketUrl);
 
-    return () => {
-      if (newWs.readyState === WebSocket.OPEN) {
-        newWs.close();
-      }
-      notificationShownRef.current = false;
-    };
-  }, [userSession, ws, handleWsMessage, handleWsClose, handleWsError]);
+      newWs.onopen = () => {
+        console.log("WebSocket 連線成功！");
+        if (!notificationShownRef.current) {
+          notifications.show({
+            title: "連線成功",
+            message: "已成功連接到聊天伺服器。",
+            color: "green",
+            autoClose: 1500,
+          });
+          notificationShownRef.current = true;
+        }
+      };
+      newWs.onmessage = handleWsMessage;
+      newWs.onclose = handleWsClose;
+      newWs.onerror = handleWsError;
+
+      setWs(newWs);
+
+      return () => {
+        if (newWs.readyState === WebSocket.OPEN) {
+          newWs.close();
+        }
+        notificationShownRef.current = false;
+      };
+    },
+    [userSession, ws, handleWsMessage, handleWsClose, handleWsError]
+  );
 
   const handleLogout = () => {
     clearUserSession();
@@ -180,7 +187,7 @@ function HomePage() {
   };
 
   // 獲取歷史聊天記錄
-  const fetchChatHistory = async (roomId: string) => {
+  const fetchChatHistory = useCallback(async (roomId: string) => {
     try {
       const response = await fetch(
         `http://localhost:8080/chat-history?roomId=${roomId}`
@@ -200,7 +207,31 @@ function HomePage() {
       });
       return [];
     }
-  };
+  }, [notifications]); // 依賴 notifications
+
+  // 處理點擊聊天室列表項目
+  const handleSelectRoom = useCallback(
+    async (room: ChatRoom) => {
+      setSelectedRoom(room);
+      connectWebSocket(room.id, room.name); // 重新連線到該聊天室的 WebSocket
+
+      // 同時，重新獲取該聊天室的歷史訊息
+      const messages = await fetchChatHistory(room.id);
+      setMessages((prevMessagesMap) => {
+        const newMap = new Map(prevMessagesMap);
+        newMap.set(room.id, messages);
+        return newMap;
+      });
+
+      notifications.show({
+        title: "進入聊天室",
+        message: `你已進入聊天室：${room.name}`,
+        color: "blue",
+        autoClose: 1500,
+      });
+    },
+    [setSelectedRoom, connectWebSocket, fetchChatHistory, setMessages]
+  );
 
   // 生成唯一的聊天室 ID (基於兩個使用者 ID)
   const generateRoomId = (user1Id: string, user2Id: string): string => {
@@ -224,7 +255,11 @@ function HomePage() {
         name: roomName,
         creatorId: userSession.id,
         participants: [
-          { id: userSession.id, username: userSession.username, email: userSession.email || "" },
+          {
+            id: userSession.id,
+            username: userSession.username,
+            email: userSession.email || "",
+          },
           targetUser,
         ],
         createdAt: new Date().toISOString(),
@@ -257,6 +292,7 @@ function HomePage() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close(); // 關閉當前 WebSocket 連線
     }
+
     setSelectedRoom(null);
     notifications.show({
       title: "退出聊天室",
@@ -356,7 +392,7 @@ function HomePage() {
                   {chatRooms.map((room) => (
                     <UnstyledButton
                       key={room.id}
-                      onClick={() => setSelectedRoom(room)} // 點擊已存在的聊天室
+                      onClick={() => handleSelectRoom(room)} // 呼叫新的處理函式
                       style={{
                         display: "flex",
                         alignItems: "center",
