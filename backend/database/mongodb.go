@@ -8,6 +8,7 @@ import (
 	"go-chat/backend/models" // 引入 models 套件
 
 	"go.mongodb.org/mongo-driver/bson" // 引入 bson 套件
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -115,4 +116,92 @@ func DisconnectMongoDB() {
 	} else {
 		log.Println("Disconnected from MongoDB.")
 	}
+}
+
+// InsertChatRoom 將新的聊天室插入到 MongoDB
+func InsertChatRoom(room models.ChatRoom) (*mongo.InsertOneResult, error) {
+	collection := GetCollection("chatrooms") // 獲取 chatrooms 集合
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	room.CreatedAt = time.Now()
+	room.UpdatedAt = time.Now()
+
+	result, err := collection.InsertOne(ctx, room)
+	if err != nil {
+		log.Printf("Error inserting chatroom: %v", err)
+		return nil, err
+	}
+	return result, nil
+}
+
+// FindChatRoomByID 根據 ID 查找聊天室
+func FindChatRoomByID(roomID primitive.ObjectID) (*models.ChatRoom, error) {
+	collection := GetCollection("chatrooms")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var room models.ChatRoom
+	err := collection.FindOne(ctx, bson.M{"_id": roomID}).Decode(&room)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil // 未找到文件
+		}
+		log.Printf("Error finding chatroom by ID %s: %v", roomID.Hex(), err)
+		return nil, err
+	}
+	return &room, nil
+}
+
+// FindChatRoomByParticipants 根據參與者 ID 查找聊天室 (用於兩人聊天室)
+func FindChatRoomByParticipants(participantIDs []primitive.ObjectID) (*models.ChatRoom, error) {
+	collection := GetCollection("chatrooms")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 確保參與者 ID 列表已排序，以便查詢一致性
+	// 注意：Go 的 primitive.ObjectID 不直接支援比較，需要轉換為字串或使用自定義比較
+	// 這裡假設傳入的 participantIDs 已經是排序好的，或者我們在查詢時不依賴順序
+	// 更穩健的做法是確保查詢條件能匹配任何順序的參與者列表
+	filter := bson.M{
+		"participants": bson.M{
+			"$size": len(participantIDs), // 確保參與者數量一致
+			"$all":  participantIDs,      // 確保包含所有指定的參與者
+		},
+	}
+
+	var room models.ChatRoom
+	err := collection.FindOne(ctx, filter).Decode(&room)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil // 未找到文件
+		}
+		log.Printf("Error finding chatroom by participants %v: %v", participantIDs, err)
+		return nil, err
+	}
+	return &room, nil
+}
+
+// GetUserChatRooms 獲取使用者所參與的所有聊天室
+func GetUserChatRooms(userID primitive.ObjectID) ([]models.ChatRoom, error) {
+	collection := GetCollection("chatrooms")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	filter := bson.M{"participants": userID}                                     // 查找 participants 陣列中包含該 userID 的聊天室
+	findOptions := options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}}) // 按最新更新時間排序
+
+	cursor, err := collection.Find(ctx, filter, findOptions)
+	if err != nil {
+		log.Printf("Error finding chatrooms for user %s: %v", userID.Hex(), err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var chatRooms []models.ChatRoom
+	if err = cursor.All(ctx, &chatRooms); err != nil {
+		log.Printf("Error decoding chatrooms for user %s: %v", userID.Hex(), err)
+		return nil, err
+	}
+	return chatRooms, nil
 }

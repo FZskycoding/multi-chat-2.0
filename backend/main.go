@@ -13,6 +13,7 @@ import (
 	"go-chat/backend/config"
 	"go-chat/backend/database"
 	"go-chat/backend/handlers"
+	"go-chat/backend/middleware"
 	"go-chat/backend/websocket" // 引入 websocket 套件
 
 	"github.com/gorilla/mux"
@@ -30,22 +31,31 @@ func main() {
 
 	router := mux.NewRouter()
 
-	// 健康檢查路由
+	// 健康檢查路由 (通常不需要 JWT)
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Backend is running!")
 	}).Methods("GET")
 
-	// 註冊 API 路由
+	// 不需要 JWT 的路由
 	router.HandleFunc("/register", handlers.RegisterUser).Methods("POST")
-	// 登入 API 路由
 	router.HandleFunc("/login", handlers.LoginUser).Methods("POST")
-	// 新增：獲取所有使用者 API 路由
-	router.HandleFunc("/users", handlers.GetAllUsers).Methods("GET")
 
-	// WebSocket 路由
+	// --- 需要 JWT 驗證的路由 ---
+	// 獲取所有使用者 API 路由 (需要登入才能看)
+	router.Handle("/users", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetAllUsers))).Methods("GET")
+
+	// 聊天室相關路由 (需要登入才能操作)
+	router.Handle("/chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
+	router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms))).Methods("GET")
+
+	// WebSocket 路由 (WebSocket 連線通常通過 URL 參數或 Cookies 進行認證，而不是 Authorization Header)
+	// 如果你的 WebSocket 連接在 URL 中傳遞了 token，可能需要在 HandleConnections 內部進行驗證
 	router.HandleFunc("/ws", websocket.HandleConnections)
-	// 聊天記錄路由
-	router.HandleFunc("/chat-history", websocket.HandleChatHistory).Methods("GET")
+	// 聊天記錄路由 (通常需要 JWT)
+	// 這裡需要注意：websocket.HandleChatHistory 如果是 REST API 獲取歷史記錄，應該加上 JWT
+	// 如果這個 /chat-history 是 WebSocket 協定的一部分，那麼應該在 HandleConnections 內部處理
+	// 假設它是一個獨立的 REST API
+	router.Handle("/chat-history", middleware.JWTMiddleware(http.HandlerFunc(websocket.HandleChatHistory))).Methods("GET")
 
 	// 設置 CORS 中介軟體
 	// 允許來自任何來源的請求，並允許 POST, GET, OPTIONS 方法

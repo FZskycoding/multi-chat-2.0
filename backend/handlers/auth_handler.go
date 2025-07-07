@@ -9,6 +9,8 @@ import (
 
 	"go-chat/backend/database"
 	"go-chat/backend/models"
+	"go-chat/backend/utils" 
+	"go-chat/backend/config"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -103,7 +105,6 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // LoginUser 處理使用者登入請求
-// LoginUser 處理使用者登入請求
 func LoginUser(w http.ResponseWriter, r *http.Request) {
 	var credentials struct {
 		Email    string `json:"email"`
@@ -145,6 +146,14 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cfg := config.LoadConfig() // 獲取 JWT Secret
+	token, err := utils.GenerateJWT(user.ID, user.Username, cfg.JWTSecret) // 調用 utils 中的 GenerateJWT 函數
+	if err != nil {
+		log.Printf("Error generating JWT token for user %s: %v", user.ID.Hex(), err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	// 登入成功
 	log.Printf("User logged in successfully: %s", user.Email)
 	w.Header().Set("Content-Type", "application/json")
@@ -154,6 +163,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		Message:  "Login successful",
 		ID:       user.ID.Hex(), // 將 ObjectID 轉換為 Hex 字串
 		Username: user.Username,
+		Token:    token,
 	})
 }
 

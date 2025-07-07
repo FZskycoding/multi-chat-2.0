@@ -17,6 +17,7 @@ type LoginResponse struct {
 	Message  string `json:"message"`
 	ID       string `json:"id"`
 	Username string `json:"username"`
+	Token    string `json:"token"`
 }
 
 // RegisterResponse 結構體用於註冊成功後的響應
