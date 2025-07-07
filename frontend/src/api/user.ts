@@ -1,5 +1,6 @@
 // src/api/user.ts
 import { notifications } from "@mantine/notifications";
+import { getUserSession } from "../utils/auth";
 
 interface User {
   id: string;
@@ -10,12 +11,17 @@ interface User {
 //回傳一個裝著 User 陣列的 Promise
 export const getAllUsers = async (): Promise<User[]> => {
   try {
+    // 獲取用戶 session
+    const session = getUserSession();
+    if (!session?.token) {
+      throw new Error("未登入或 token 無效");
+    }
+
     const response = await fetch("http://localhost:8080/users", {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        // 如果有 token 認證，這裡需要加上 Authorization Header
-        // 'Authorization': `Bearer ${token}`
+        "Authorization": `Bearer ${session.token}`,
       },
     });
 

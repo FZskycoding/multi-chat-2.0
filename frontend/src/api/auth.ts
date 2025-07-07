@@ -18,6 +18,7 @@ interface AuthResponse {
   message: string;
   id?: string;
   username?: string;
+  token?: string;  // 添加 token 欄位
 }
 
 // 註冊

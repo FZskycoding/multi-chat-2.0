@@ -3,8 +3,8 @@
 interface UserSession {
   id: string;
   username: string;
-  email?: string; // 新增 email 屬性
-  // 可以根據需求添加其他資訊，例如 token
+  email?: string;
+  token?: string;  // 添加 token 欄位
 }
 
 const USER_SESSION_KEY = "user_session";
