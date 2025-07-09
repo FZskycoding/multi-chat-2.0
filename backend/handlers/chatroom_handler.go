@@ -5,33 +5,57 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"strings"
 
 	"go-chat/backend/database"
 	"go-chat/backend/models"
 	"go-chat/backend/utils" // 引入 utils 套件
 
+	
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // CreateChatRoomRequest 定義創建聊天室的請求體
 type CreateChatRoomRequest struct {
-	Name          string   `json:"name"`
-	ParticipantIDs []string `json:"participantIds"` // 參與者的使用者 ID 字串列表
+    ParticipantIDs []string `json:"participantIds"` // 參與者的使用者 ID 字串列表
+}
+
+// UpdateChatRoomRequest 定義更新聊天室的請求體
+type UpdateChatRoomRequest struct {
+    ParticipantIDs []string `json:"participantIds"` // 新的參與者列表
+}
+
+// 根據用戶ID獲取用戶名稱列表
+func getUsernames(userIDs []primitive.ObjectID) ([]string, error) {
+    usernames := make([]string, 0, len(userIDs))
+    for _, id := range userIDs {
+        user, err := database.GetUserByID(id)
+        if err != nil {
+            return nil, err
+        }
+        usernames = append(usernames, user.Username)
+    }
+    return usernames, nil
+}
+
+// generateRoomName 根據參與者生成聊天室名稱
+func generateRoomName(participantUsernames []string) string {
+    return strings.Join(participantUsernames, "、") + "的聊天室"
 }
 
 // CreateChatRoom 處理創建聊天室的請求
 func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
-	var req CreateChatRoomRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+    var req CreateChatRoomRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
 
-	// 驗證請求參數
-	if req.Name == "" || len(req.ParticipantIDs) < 2 {
-		http.Error(w, "Room name and at least two participants are required", http.StatusBadRequest)
-		return
-	}
+    // 驗證請求參數
+    if len(req.ParticipantIDs) < 2 {
+        http.Error(w, "At least two participants are required", http.StatusBadRequest)
+        return
+    }
 
 	// 從 JWT token 中獲取創建者 ID
 	creatorID, err := utils.GetUserIDFromContext(r.Context())
@@ -90,9 +114,17 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 創建新的聊天室物件
-	newChatRoom := models.ChatRoom{
-		Name:        req.Name,
+// 獲取所有參與者的用戶名
+usernames, err := getUsernames(participantObjectIDs)
+if err != nil {
+    log.Printf("Error getting usernames: %v", err)
+    http.Error(w, "Internal server error", http.StatusInternalServerError)
+    return
+}
+
+// 創建新的聊天室物件，使用生成的名稱
+newChatRoom := models.ChatRoom{
+Name:        generateRoomName(usernames),
 		CreatorID:   creatorID,
 		Participants: participantObjectIDs,
 		CreatedAt:   time.Now(),
@@ -130,5 +162,57 @@ func GetUserChatRooms(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(chatRooms)
+json.NewEncoder(w).Encode(chatRooms)
+}
+
+// UpdateChatRoom 處理更新聊天室的請求
+func UpdateChatRoom(w http.ResponseWriter, r *http.Request) {
+    var req UpdateChatRoomRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    // 從URL獲取聊天室ID
+    roomIDStr := r.URL.Query().Get("id")
+    if roomIDStr == "" {
+        http.Error(w, "Room ID is required", http.StatusBadRequest)
+        return
+    }
+
+    roomID, err := primitive.ObjectIDFromHex(roomIDStr)
+    if err != nil {
+        http.Error(w, "Invalid room ID format", http.StatusBadRequest)
+        return
+    }
+
+    // 將參與者ID字串轉換為ObjectID
+    var participantObjectIDs []primitive.ObjectID
+    for _, idStr := range req.ParticipantIDs {
+        objID, err := primitive.ObjectIDFromHex(idStr)
+        if err != nil {
+            http.Error(w, "Invalid participant ID format", http.StatusBadRequest)
+            return
+        }
+        participantObjectIDs = append(participantObjectIDs, objID)
+    }
+
+    // 獲取所有參與者的用戶名
+    usernames, err := getUsernames(participantObjectIDs)
+    if err != nil {
+        log.Printf("Error getting usernames: %v", err)
+        http.Error(w, "Internal server error", http.StatusInternalServerError)
+        return
+    }
+
+    // 更新聊天室
+    updatedRoom, err := database.UpdateChatRoom(roomID, participantObjectIDs, generateRoomName(usernames))
+    if err != nil {
+        log.Printf("Error updating chatroom: %v", err)
+        http.Error(w, "Internal server error", http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(updatedRoom)
 }

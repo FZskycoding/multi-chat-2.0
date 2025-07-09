@@ -44,9 +44,10 @@ func main() {
 	// 獲取所有使用者 API 路由 (需要登入才能看)
 	router.Handle("/users", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetAllUsers))).Methods("GET")
 
-	// 聊天室相關路由 (需要登入才能操作)
-	router.Handle("/chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
-	router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms))).Methods("GET")
+// 聊天室相關路由 (需要登入才能操作)
+router.Handle("/chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
+router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms))).Methods("GET")
+router.Handle("/chatrooms/{id}", middleware.JWTMiddleware(http.HandlerFunc(handlers.UpdateChatRoom))).Methods("PUT")
 
 	// WebSocket 路由 (WebSocket 連線通常通過 URL 參數或 Cookies 進行認證，而不是 Authorization Header)
 	// 如果你的 WebSocket 連接在 URL 中傳遞了 token，可能需要在 HandleConnections 內部進行驗證

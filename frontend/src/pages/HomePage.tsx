@@ -22,6 +22,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { getUserSession, clearUserSession } from "../utils/auth";
 import { getAllUsers } from "../api/user";
+import { createOrGetChatRoom, getUserChatRooms } from "../api/chatroom";
 import {
   IconMessageCircle,
   IconLogout,
@@ -81,12 +82,21 @@ function HomePage() {
       return;
     }
 
+    // 獲取所有使用者
     const fetchAllUsers = async () => {
       const users = await getAllUsers();
       if (userSession) {
         setAllUsers(users.filter((u: User) => u.id !== userSession!.id));
       }
     };
+
+    // 獲取使用者的聊天室列表
+    const fetchUserChatRooms = async () => {
+      const rooms = await getUserChatRooms();
+      setChatRooms(rooms);
+    };
+
+    fetchUserChatRooms();
     fetchAllUsers();
   }, [userSession, navigate]);
 
@@ -187,27 +197,35 @@ function HomePage() {
   };
 
   // 獲取歷史聊天記錄
-  const fetchChatHistory = useCallback(async (roomId: string) => {
-    try {
-      const response = await fetch(
-        `http://localhost:8080/chat-history?roomId=${roomId}`
-      );
-      if (!response.ok) {
-        throw new Error("Failed to fetch chat history");
+  const fetchChatHistory = useCallback(
+    async (roomId: string) => {
+      try {
+        const response = await fetch(
+          `http://localhost:8080/chat-history?roomId=${roomId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${userSession!.token}`,
+            },
+          }
+        );
+        if (!response.ok) {
+          throw new Error("Failed to fetch chat history");
+        }
+        const data = await response.json();
+        return data.messages;
+      } catch (error) {
+        console.error(`Error fetching chat history for room ${roomId}:`, error);
+        notifications.show({
+          title: "錯誤",
+          message: `無法獲取聊天室 ${roomId} 的聊天記錄`,
+          color: "red",
+          autoClose: 2000,
+        });
+        return [];
       }
-      const data = await response.json();
-      return data.messages;
-    } catch (error) {
-      console.error(`Error fetching chat history for room ${roomId}:`, error);
-      notifications.show({
-        title: "錯誤",
-        message: `無法獲取聊天室 ${roomId} 的聊天記錄`,
-        color: "red",
-        autoClose: 2000,
-      });
-      return [];
-    }
-  }, [notifications]); // 依賴 notifications
+    },
+    [notifications]
+  ); // 依賴 notifications
 
   // 處理點擊聊天室列表項目
   const handleSelectRoom = useCallback(
@@ -233,58 +251,61 @@ function HomePage() {
     [setSelectedRoom, connectWebSocket, fetchChatHistory, setMessages]
   );
 
-  // 生成唯一的聊天室 ID (基於兩個使用者 ID)
-  const generateRoomId = (user1Id: string, user2Id: string): string => {
-    const sortedIds = [user1Id, user2Id].sort();
-    return `${sortedIds[0]}-${sortedIds[1]}`;
-  };
-
   // 打開聊天室 (與特定使用者建立/加入聊天室)
   const startChatWithUser = async (targetUser: User) => {
     if (!userSession) return;
 
-    const roomId = generateRoomId(userSession.id, targetUser.id);
-    const roomName = `${userSession.username}、${targetUser.username} 的聊天室`;
+    try {
+      const roomName = `${userSession.username}、${targetUser.username} 的聊天室`;
+      // 使用 API 創建或獲取聊天室
+      const room = await createOrGetChatRoom([userSession.id, targetUser.id], roomName);
 
-    let existingRoom = chatRooms.find((room) => room.id === roomId);
+      if (!room) {
+        notifications.show({
+          title: "錯誤",
+          message: "無法創建或獲取聊天室",
+          color: "red",
+          autoClose: 2000,
+        });
+        return;
+      }
 
-    if (!existingRoom) {
-      // 如果聊天室不存在，則建立一個新的
-      const newRoom: ChatRoom = {
-        id: roomId,
-        name: roomName,
-        creatorId: userSession.id,
-        participants: [
-          {
-            id: userSession.id,
-            username: userSession.username,
-            email: userSession.email || "",
-          },
-          targetUser,
-        ],
-        createdAt: new Date().toISOString(),
-      };
-      setChatRooms((prev) => [...prev, newRoom]);
-      existingRoom = newRoom; // 將新建立的房間賦值給 existingRoom
+      // 更新聊天室列表
+      setChatRooms((prev) => {
+        // 檢查是否已存在相同 ID 的聊天室
+        const exists = prev.some((r) => r.id === room.id);
+        if (!exists) {
+          return [...prev, room];
+        }
+        return prev;
+      });
+
+      setSelectedRoom(room); // 設定選中的聊天室
+      connectWebSocket(room.id, room.name); // 連接到該聊天室的 WebSocket
+
+      // 獲取歷史聊天記錄
+      const messages = await fetchChatHistory(room.id);
+      setMessages((prevMessagesMap) => {
+        const newMap = new Map(prevMessagesMap);
+        newMap.set(room.id, messages);
+        return newMap;
+      });
+
+      notifications.show({
+        title: "進入聊天室",
+        message: `你已進入聊天室：${room.name}`,
+        color: "blue",
+        autoClose: 1500,
+      });
+    } catch (error) {
+      console.error("Error creating/getting chatroom:", error);
+      notifications.show({
+        title: "錯誤",
+        message: "創建或加入聊天室時發生錯誤",
+        color: "red",
+        autoClose: 2000,
+      });
     }
-
-    setSelectedRoom(existingRoom); // 設定選中的聊天室
-    connectWebSocket(existingRoom.id, existingRoom.name); // 連接到該聊天室的 WebSocket
-
-    // 獲取歷史聊天記錄
-    const messages = await fetchChatHistory(existingRoom.id);
-    setMessages((prevMessagesMap) => {
-      const newMap = new Map(prevMessagesMap);
-      newMap.set(existingRoom.id, messages);
-      return newMap;
-    });
-
-    notifications.show({
-      title: "進入聊天室",
-      message: `你已進入聊天室：${existingRoom.name}`,
-      color: "blue",
-      autoClose: 1500,
-    });
   };
 
   // 關閉聊天室
@@ -383,7 +404,7 @@ function HomePage() {
                 聊天室列表
               </Text>
               <Divider mb="sm" />
-              {chatRooms.length === 0 ? (
+              {chatRooms?.length === 0 ? (
                 <Text c="dimmed" size="sm" mb="md">
                   尚無聊天室。請從下方選擇使用者建立聊天室。
                 </Text>
