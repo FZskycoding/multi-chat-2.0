@@ -92,10 +92,15 @@ function HomePage() {
 
     // 獲取使用者的聊天室列表
     const fetchUserChatRooms = async () => {
-      const rooms = await getUserChatRooms();
-      setChatRooms(rooms);
+      try {
+        const rooms = await getUserChatRooms();
+        setChatRooms(rooms || []); // 確保總是設置為陣列
+      } catch (error) {
+        console.error("Error fetching chat rooms:", error);
+        setChatRooms([]); // 錯誤時設置為空陣列
+      }
     };
-
+    
     fetchUserChatRooms();
     fetchAllUsers();
   }, [userSession, navigate]);
@@ -150,9 +155,12 @@ function HomePage() {
 
   // 建立 WebSocket 連線
   const connectWebSocket = useCallback(
-    (roomId: string, roomName: string) => {
+    async (roomId: string, roomName: string) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close(); // 關閉現有連線
+        await new Promise((resolve) => {
+          ws.onclose = resolve;
+          ws.close();
+        });
       }
 
       const websocketUrl = `ws://localhost:8080/ws?userId=${
@@ -224,8 +232,8 @@ function HomePage() {
         return [];
       }
     },
-    [notifications]
-  ); // 依賴 notifications
+    [userSession]
+  ); 
 
   // 處理點擊聊天室列表項目
   const handleSelectRoom = useCallback(
@@ -258,7 +266,10 @@ function HomePage() {
     try {
       const roomName = `${userSession.username}、${targetUser.username} 的聊天室`;
       // 使用 API 創建或獲取聊天室
-      const room = await createOrGetChatRoom([userSession.id, targetUser.id], roomName);
+      const room = await createOrGetChatRoom(
+        [userSession.id, targetUser.id],
+        roomName
+      );
 
       if (!room) {
         notifications.show({

@@ -40,6 +40,7 @@ export async function getUserChatRooms(): Promise<ChatRoom[]> {
       },
     });
 
+    // 當伺服器連線失敗時
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || "無法獲取聊天室列表");
@@ -143,9 +144,9 @@ export async function createOrGetChatRoom(
         "Content-Type": "application/json",
         Authorization: `Bearer ${userSession.token}`,
       },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         name,
-        participantIds 
+        participantIds,
       }),
     });
 
@@ -172,4 +173,3 @@ export async function createOrGetChatRoom(
     return null;
   }
 }
-
