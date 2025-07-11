@@ -20,7 +20,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { getUserSession, clearUserSession } from "../utils/auth";
+import { getUserSession, clearUserSession } from "../utils/utils_auth";
 import { getAllUsers } from "../api/user";
 import { createOrGetChatRoom, getUserChatRooms } from "../api/chatroom";
 import {
@@ -100,7 +100,7 @@ function HomePage() {
         setChatRooms([]); // 錯誤時設置為空陣列
       }
     };
-    
+
     fetchUserChatRooms();
     fetchAllUsers();
   }, [userSession, navigate]);
@@ -233,7 +233,7 @@ function HomePage() {
       }
     },
     [userSession]
-  ); 
+  );
 
   // 處理點擊聊天室列表項目
   const handleSelectRoom = useCallback(
@@ -500,7 +500,7 @@ function HomePage() {
             <Group justify="space-between" align="center" mb="md">
               <Title order={3}>聊天室：{selectedRoom.name}</Title>
               <Button variant="light" color="red" onClick={exitChat}>
-                退出聊天室
+                回到首頁
               </Button>
             </Group>
             <Divider mb="md" />

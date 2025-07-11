@@ -1,6 +1,6 @@
 // src/api/user.ts
 import { notifications } from "@mantine/notifications";
-import { getUserSession } from "../utils/auth";
+import { getUserSession } from "../utils/utils_auth";
 
 interface User {
   id: string;
@@ -21,7 +21,7 @@ export const getAllUsers = async (): Promise<User[]> => {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${session.token}`,
+        Authorization: `Bearer ${session.token}`,
       },
     });
 
@@ -31,7 +31,7 @@ export const getAllUsers = async (): Promise<User[]> => {
         title: "載入使用者失敗",
         message: errorData.message || "無法載入所有使用者列表",
         color: "red",
-        autoClose: 2000
+        autoClose: 2000,
       });
       return [];
     }
@@ -44,7 +44,7 @@ export const getAllUsers = async (): Promise<User[]> => {
       title: "網路錯誤",
       message: "無法連線到伺服器，請檢查網路。",
       color: "red",
-      autoClose: 2000
+      autoClose: 2000,
     });
     return [];
   }

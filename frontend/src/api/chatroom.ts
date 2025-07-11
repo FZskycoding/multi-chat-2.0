@@ -1,6 +1,6 @@
 // frontend/src/api/chatroom.ts
 import { notifications } from "@mantine/notifications";
-import { getUserSession } from "../utils/auth"; // 確保導入正確的路徑
+import { getUserSession } from "../utils/utils_auth"; // 確保導入正確的路徑
 
 // 定義與後端 ChatRoom 模型相符的介面
 export interface ChatRoom {

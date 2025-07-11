@@ -3,7 +3,7 @@ import React, { useEffect } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import AuthPage from "./pages/AuthPage";
 import HomePage from "./pages/HomePage";
-import { isAuthenticated } from "./utils/auth";
+import { isAuthenticated } from "./utils/utils_auth";
 
 function App() {
   const navigate = useNavigate();

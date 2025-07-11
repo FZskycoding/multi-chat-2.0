@@ -13,8 +13,8 @@ import {
   Flex,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { register, login } from "../api/auth";
-import { saveUserSession } from "../utils/auth";
+import { register, login } from "../api/api_auth";
+import { saveUserSession } from "../utils/utils_auth";
 
 function AuthPage() {
   const [isRegister, setIsRegister] = useState(false);
@@ -63,10 +63,10 @@ function AuthPage() {
     try {
       const response = await login(values);
       if (response.id && response.username && response.token) {
-        saveUserSession({ 
-          id: response.id, 
+        saveUserSession({
+          id: response.id,
           username: response.username,
-          token: response.token 
+          token: response.token,
         });
         navigate("/home"); // 登入成功後導航到首頁
       }
