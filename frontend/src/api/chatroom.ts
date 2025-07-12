@@ -123,6 +123,52 @@ export async function updateChatRoom(
  * @param {string} name - 聊天室名稱
  * @returns {Promise<ChatRoom | null>} 創建或獲取的聊天室物件
  */
+/**
+ * 退出聊天室
+ * @param {string} roomId - 要退出的聊天室ID
+ * @returns {Promise<boolean>} 退出成功返回true，失敗返回false
+ */
+export async function leaveChatRoom(roomId: string): Promise<boolean> {
+  const userSession = getUserSession();
+  if (!userSession || !userSession.token) {
+    notifications.show({
+      title: "錯誤",
+      message: "未登入或缺少認證資訊，無法退出聊天室。",
+      color: "red",
+    });
+    return false;
+  }
+
+  try {
+    const response = await fetch(`http://localhost:8080/chatrooms/${roomId}/leave`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${userSession.token}`,
+      }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "無法退出聊天室");
+    }
+
+    return true;
+  } catch (error: unknown) {
+    console.error("Error leaving chat room:", error);
+    let errorMessage = "退出聊天室失敗";
+    if (error instanceof Error) {
+      errorMessage = `退出聊天室失敗: ${error.message}`;
+    }
+    notifications.show({
+      title: "錯誤",
+      message: errorMessage,
+      color: "red",
+    });
+    return false;
+  }
+}
+
 export async function createOrGetChatRoom(
   participantIds: string[],
   name: string

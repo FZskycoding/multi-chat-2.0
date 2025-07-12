@@ -17,18 +17,20 @@ import {
   Stack,
   TextInput,
   ActionIcon,
+  Menu,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { getUserSession, clearUserSession } from "../utils/utils_auth";
 import { getAllUsers } from "../api/user";
-import { createOrGetChatRoom, getUserChatRooms } from "../api/chatroom";
+import { createOrGetChatRoom, getUserChatRooms, leaveChatRoom } from "../api/chatroom";
 import {
   IconMessageCircle,
   IconLogout,
   IconUserCircle,
   IconSend,
   IconPhoto,
+  IconDotsVertical,
 } from "@tabler/icons-react";
 
 interface ChatRoom {
@@ -319,6 +321,38 @@ function HomePage() {
     }
   };
 
+  // 處理退出聊天室
+  const handleLeaveRoom = useCallback(async (room: ChatRoom) => {
+    try {
+      const success = await leaveChatRoom(room.id);
+      
+      if (success) {
+        // 關閉 WebSocket 連接
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+        
+        // 從聊天室列表中移除
+        setChatRooms(prev => prev.filter(r => r.id !== room.id));
+        
+        // 如果正在查看此聊天室，則導向首頁
+        if (selectedRoom?.id === room.id) {
+          setSelectedRoom(null);
+        }
+
+        // 顯示通知
+        notifications.show({
+          title: "已退出聊天室",
+          message: `您已成功退出聊天室：${room.name}`,
+          color: "blue",
+          autoClose: 1500,
+        });
+      }
+    } catch (error) {
+      console.error("Error leaving room:", error);
+    }
+  }, [ws, selectedRoom]);
+
   // 關閉聊天室
   const exitChat = () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -422,27 +456,45 @@ function HomePage() {
               ) : (
                 <Stack gap="md">
                   {chatRooms.map((room) => (
-                    <UnstyledButton
-                      key={room.id}
-                      onClick={() => handleSelectRoom(room)} // 呼叫新的處理函式
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        padding: rem(10),
-                        borderRadius: "var(--mantine-radius-sm)",
-                        backgroundColor:
-                          selectedRoom?.id === room.id
-                            ? "var(--mantine-color-blue-0)"
-                            : "transparent",
-                      }}
-                    >
-                      <Avatar color="blue" radius="xl">
-                        <IconMessageCircle size={24} />
-                      </Avatar>
-                      <Text ml="md" fw={500}>
-                        {room.name}
-                      </Text>
-                    </UnstyledButton>
+                    <Group key={room.id} wrap="nowrap" justify="space-between">
+                      <UnstyledButton
+                        onClick={() => handleSelectRoom(room)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          padding: rem(10),
+                          borderRadius: "var(--mantine-radius-sm)",
+                          backgroundColor:
+                            selectedRoom?.id === room.id
+                              ? "var(--mantine-color-blue-0)"
+                              : "transparent",
+                          flex: 1,
+                        }}
+                      >
+                        <Avatar color="blue" radius="xl">
+                          <IconMessageCircle size={24} />
+                        </Avatar>
+                        <Text ml="md" fw={500}>
+                          {room.name}
+                        </Text>
+                      </UnstyledButton>
+                      <Menu>
+                        <Menu.Target>
+                          <ActionIcon variant="subtle" color="gray">
+                            <IconDotsVertical size={16} />
+                          </ActionIcon>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                          <Menu.Item
+                            color="red"
+                            leftSection={<IconLogout size={14} />}
+                            onClick={() => handleLeaveRoom(room)}
+                          >
+                            退出聊天室
+                          </Menu.Item>
+                        </Menu.Dropdown>
+                      </Menu>
+                    </Group>
                   ))}
                 </Stack>
               )}
@@ -499,7 +551,7 @@ function HomePage() {
           >
             <Group justify="space-between" align="center" mb="md">
               <Title order={3}>聊天室：{selectedRoom.name}</Title>
-              <Button variant="light" color="red" onClick={exitChat}>
+              <Button variant="light" color="green" onClick={exitChat}>
                 回到首頁
               </Button>
             </Group>
