@@ -213,18 +213,30 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 更新聊天室的參與者列表
-	usernames, err := getUsernames(newParticipants)
-	if err != nil {
-		log.Printf("Error getting usernames: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	if len(newParticipants) > 0 {
+		// 獲取剩餘參與者的用戶名
+		usernames, err := getUsernames(newParticipants)
+		if err != nil {
+			log.Printf("Error getting usernames: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 
-	_, err = database.UpdateChatRoom(roomID, newParticipants, generateRoomName(usernames))
-	if err != nil {
-		log.Printf("Error updating chatroom: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+		// 更新聊天室
+		_, err = database.UpdateChatRoom(roomID, newParticipants, generateRoomName(usernames))
+		if err != nil {
+			log.Printf("Error updating chatroom: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// 如果沒有參與者了，刪除聊天室
+		err = database.DeleteChatRoom(roomID)
+		if err != nil {
+			log.Printf("Error deleting empty chatroom: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// 獲取退出使用者的用戶名和創建系統消息
