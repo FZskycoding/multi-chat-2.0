@@ -74,13 +74,13 @@ var upgrader = websocket.Upgrader{
 
 // Client 代表一個 WebSocket 客戶端
 type Client struct {
-	hub        *Hub                // 負責管理所有客戶端和訊息流
-	conn       *websocket.Conn     // WebSocket 連線物件，透過它來讀寫訊息
-	send       chan models.Message // 用於發送訊息的緩衝通道，類型改為 models.Message
-	UserID     primitive.ObjectID
-	Username   string
-	RoomID     string // 客戶端所在的聊天室ID
-	RoomName   string // 客戶端所在的聊天室名稱
+	hub      *Hub                // 負責管理所有客戶端和訊息流
+	conn     *websocket.Conn     // WebSocket 連線物件，透過它來讀寫訊息
+	send     chan models.Message // 用於發送訊息的緩衝通道，類型改為 models.Message
+	UserID   primitive.ObjectID
+	Username string
+	RoomID   string // 客戶端所在的聊天室ID
+	RoomName string // 客戶端所在的聊天室名稱
 }
 
 // 讀取用戶傳來的訊息，並丟給 Hub
@@ -116,6 +116,7 @@ func (c *Client) readPump() {
 		msg.RoomID = c.RoomID     // 從客戶端連線資訊獲取 RoomID
 		msg.RoomName = c.RoomName // 從客戶端連線資訊獲取 RoomName
 		msg.Timestamp = time.Now()
+		msg.Type = models.MessageTypeNormal // 設置為普通消息類型
 
 		// 將訊息儲存到資料庫並獲得結果
 		result, err := database.InsertMessage(msg)
@@ -175,21 +176,21 @@ func (c *Client) writePump() {
 
 // Hub 維護所有活躍的 WebSocket 客戶端，並處理訊息的廣播
 type Hub struct {
-	clients         map[*Client]bool
-	clientsByRoom   map[string]map[*Client]bool // 按聊天室ID索引的客戶端
-	broadcast       chan models.Message
-	register        chan *Client
-	unregister      chan *Client
+	clients       map[*Client]bool
+	clientsByRoom map[string]map[*Client]bool // 按聊天室ID索引的客戶端
+	broadcast     chan models.Message
+	register      chan *Client
+	unregister    chan *Client
 }
 
 // NewHub 創建並返回一個新的 Hub 實例
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:       make(chan models.Message),
-		register:        make(chan *Client),
-		unregister:      make(chan *Client),
-		clients:         make(map[*Client]bool),
-		clientsByRoom:   make(map[string]map[*Client]bool), // 初始化
+		broadcast:     make(chan models.Message),
+		register:      make(chan *Client),
+		unregister:    make(chan *Client),
+		clients:       make(map[*Client]bool),
+		clientsByRoom: make(map[string]map[*Client]bool), // 初始化
 	}
 }
 
@@ -243,6 +244,11 @@ func (h *Hub) Run() {
 
 // 全局 Hub 實例
 var GlobalHub = NewHub()
+
+// BroadcastMessage 廣播消息到指定的聊天室
+func BroadcastMessage(message models.Message) {
+    GlobalHub.broadcast <- message
+}
 
 // HandleConnections 處理 WebSocket 連線請求
 func HandleConnections(w http.ResponseWriter, r *http.Request) {

@@ -50,6 +50,7 @@ interface User {
 // 定義訊息類型，與後端 models.Message 保持一致
 interface Message {
   id?: string; // 後端生成
+  type?: "normal" | "system"; // 消息類型
   senderId: string;
   senderUsername: string;
   roomId: string; // 聊天室ID
@@ -569,23 +570,40 @@ function HomePage() {
                           : "flex-start"
                       }
                     >
-                      <Paper
-                        p="xs"
-                        radius="md"
-                        shadow="xs"
-                        bg={
-                          msg.senderId === userSession.id
-                            ? "#c3efab" //淺綠色
-                            : "#cde2ff" //淺藍色
-                        }
-                        style={{ maxWidth: "70%" }}
-                      >
-                        <Text size="xs" c="dark">
-                          {msg.senderUsername} (
-                          {new Date(msg.timestamp).toLocaleTimeString()})
-                        </Text>
-                        <Text>{msg.content}</Text>
-                      </Paper>
+                      {msg.type === "system" ? (
+                        <Paper
+                          p="xs"
+                          radius="md"
+                          w="20%"
+                          bg="var(--mantine-color-gray-1)"
+                          style={{ textAlign: "center", margin: "0 auto" }}
+                        >
+                          <Text size="sm" c="dimmed">
+                            {msg.content}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            {new Date(msg.timestamp).toLocaleTimeString()}
+                          </Text>
+                        </Paper>
+                      ) : (
+                        <Paper
+                          p="xs"
+                          radius="md"
+                          shadow="xs"
+                          bg={
+                            msg.senderId === userSession.id
+                              ? "#c3efab" //淺綠色
+                              : "#cde2ff" //淺藍色
+                          }
+                          style={{ maxWidth: "70%" }}
+                        >
+                          <Text size="xs" c="dark">
+                            {msg.senderUsername} (
+                            {new Date(msg.timestamp).toLocaleTimeString()})
+                          </Text>
+                          <Text>{msg.content}</Text>
+                        </Paper>
+                      )}
                     </Group>
                   ))}
                 <div ref={messagesEndRef} /> {/* 滾動錨點 */}

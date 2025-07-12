@@ -10,6 +10,7 @@ import (
 	"go-chat/backend/database"
 	"go-chat/backend/models"
 	"go-chat/backend/utils" // 引入 utils 套件
+	"go-chat/backend/websocket"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -226,6 +227,36 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 獲取退出使用者的用戶名和創建系統消息
+	exitingUser, err := database.GetUserByID(userID)
+	if err != nil {
+		log.Printf("Error getting exiting user: %v", err)
+		// 如果無法獲取用戶名，使用備用訊息
+		exitingUser = &models.User{Username: "某人"}
+	}
+
+	// 創建並發送系統消息
+	systemMessage := models.Message{
+		Type:           models.MessageTypeSystem,
+		SenderID:       userID,
+		SenderUsername: "系統",
+		RoomID:         roomID.Hex(),
+		RoomName:       room.Name,
+		Content:        exitingUser.Username + " 已離開聊天室",
+		Timestamp:      time.Now(),
+		IsRead:         true,
+	}
+
+	// 通過 WebSocket 廣播系統消息
+	websocket.BroadcastMessage(systemMessage)
+
+	// 存儲系統消息
+	_, err = database.InsertMessage(systemMessage)
+	if err != nil {
+		log.Printf("Error inserting system message: %v", err)
+		// 繼續執行，不中斷流程
+	}
+
 	// 返回成功狀態
 	response := map[string]bool{"success": true}
 	json.NewEncoder(w).Encode(response)
@@ -233,10 +264,10 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 
 // UpdateChatRoom 處理更新聊天室的請求
 func UpdateChatRoom(w http.ResponseWriter, r *http.Request) {
-// 設置響應類型
-w.Header().Set("Content-Type", "application/json")
+	// 設置響應類型
+	w.Header().Set("Content-Type", "application/json")
 
-var req UpdateChatRoomRequest
+	var req UpdateChatRoomRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -256,20 +287,20 @@ var req UpdateChatRoomRequest
 		return
 	}
 
-// 檢查聊天室是否存在
-existingRoom, err := database.FindChatRoomByID(roomID)
-if err != nil {
-    log.Printf("Error getting chatroom: %v", err)
-    http.Error(w, "Internal server error", http.StatusInternalServerError)
-    return
-}
-if existingRoom == nil {
-    http.Error(w, "Chat room not found", http.StatusNotFound)
-    return
-}
+	// 檢查聊天室是否存在
+	existingRoom, err := database.FindChatRoomByID(roomID)
+	if err != nil {
+		log.Printf("Error getting chatroom: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if existingRoom == nil {
+		http.Error(w, "Chat room not found", http.StatusNotFound)
+		return
+	}
 
-// 將參與者ID字串轉換為ObjectID
-var participantObjectIDs []primitive.ObjectID
+	// 將參與者ID字串轉換為ObjectID
+	var participantObjectIDs []primitive.ObjectID
 	for _, idStr := range req.ParticipantIDs {
 		objID, err := primitive.ObjectIDFromHex(idStr)
 		if err != nil {
@@ -295,5 +326,5 @@ var participantObjectIDs []primitive.ObjectID
 		return
 	}
 
-json.NewEncoder(w).Encode(updatedRoom)
+	json.NewEncoder(w).Encode(updatedRoom)
 }
