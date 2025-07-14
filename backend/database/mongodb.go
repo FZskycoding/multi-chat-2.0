@@ -28,6 +28,33 @@ func GetUserByID(userID primitive.ObjectID) (*models.User, error) {
 	return &user, nil
 }
 
+// GetUsersByIDs 根據多個用戶ID獲取用戶信息列表
+func GetUsersByIDs(userIDs []primitive.ObjectID) ([]models.User, error) {
+	if len(userIDs) == 0 {
+		return []models.User{}, nil
+	}
+
+	collection := GetCollection("users")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": bson.M{"$in": userIDs}} // 使用 $in 操作符查詢多個 ID
+
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		log.Printf("Error finding users by IDs %v: %v", userIDs, err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var users []models.User
+	if err = cursor.All(ctx, &users); err != nil {
+		log.Printf("Error decoding users by IDs: %v", err)
+		return nil, err
+	}
+	return users, nil
+}
+
 // UpdateChatRoom 更新聊天室信息
 func UpdateChatRoom(roomID primitive.ObjectID, participants []primitive.ObjectID, newName string) (*models.ChatRoom, error) {
 	collection := GetCollection("chatrooms")

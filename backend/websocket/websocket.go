@@ -129,7 +129,7 @@ func (c *Client) readPump() {
 		msg.ID = result.InsertedID.(primitive.ObjectID)
 
 		// 將包含 ID 的訊息廣播給所有客戶端
-		c.hub.broadcast <- msg
+		c.hub.Broadcast <- msg
 	}
 }
 
@@ -178,7 +178,7 @@ func (c *Client) writePump() {
 type Hub struct {
 	clients       map[*Client]bool
 	clientsByRoom map[string]map[*Client]bool // 按聊天室ID索引的客戶端
-	broadcast     chan models.Message
+	Broadcast     chan models.Message
 	register      chan *Client
 	unregister    chan *Client
 }
@@ -186,7 +186,7 @@ type Hub struct {
 // NewHub 創建並返回一個新的 Hub 實例
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:     make(chan models.Message),
+		Broadcast:     make(chan models.Message),
 		register:      make(chan *Client),
 		unregister:    make(chan *Client),
 		clients:       make(map[*Client]bool),
@@ -218,7 +218,7 @@ func (h *Hub) Run() {
 				close(client.send)
 				log.Printf("Client %s unregistered from room %s. Total clients in room: %d", client.UserID.Hex(), client.RoomID, len(h.clientsByRoom[client.RoomID]))
 			}
-		case message := <-h.broadcast:
+		case message := <-h.Broadcast:
 			// 廣播訊息到特定聊天室
 			if clientsInRoom, ok := h.clientsByRoom[message.RoomID]; ok {
 				// 針對聊天室內每一個用戶進行廣播
@@ -247,7 +247,7 @@ var GlobalHub = NewHub()
 
 // BroadcastMessage 廣播消息到指定的聊天室
 func BroadcastMessage(message models.Message) {
-    GlobalHub.broadcast <- message
+    GlobalHub.Broadcast <- message
 }
 
 // HandleConnections 處理 WebSocket 連線請求

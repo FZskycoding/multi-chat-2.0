@@ -26,6 +26,11 @@ type UpdateChatRoomRequest struct {
 	ParticipantIDs []string `json:"participantIds"` // 新的參與者列表
 }
 
+// AddParticipantsRequest 定義邀請參與者的請求體
+type AddParticipantsRequest struct {
+	NewParticipantIDs []string `json:"newParticipantIds"` // 新增參與者的使用者 ID 字串列表
+}
+
 // 根據用戶ID獲取用戶名稱列表
 func getUsernames(userIDs []primitive.ObjectID) ([]string, error) {
 	usernames := make([]string, 0, len(userIDs))
@@ -251,7 +256,7 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 	systemMessage := models.Message{
 		Type:           models.MessageTypeSystem,
 		SenderID:       userID,
-		SenderUsername: "系統",
+		SenderUsername: "系統訊息",
 		RoomID:         roomID.Hex(),
 		RoomName:       room.Name,
 		Content:        exitingUser.Username + " 已離開聊天室",
@@ -272,6 +277,155 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 	// 返回成功狀態
 	response := map[string]bool{"success": true}
 	json.NewEncoder(w).Encode(response)
+}
+
+// AddParticipants 處理將新使用者加入聊天室的請求
+// 這個 API 端點會是 PUT /chatrooms/{id}/participants
+func AddParticipants(w http.ResponseWriter, r *http.Request) {
+	// 從 context 中獲取邀請者的 userID
+	userID, err := utils.GetUserIDFromContext(r.Context())
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	roomIDStr := vars["id"] // 從 URL 路徑中獲取 room ID
+	if roomIDStr == "" {
+		http.Error(w, "Room ID is required", http.StatusBadRequest)
+		return
+	}
+
+	roomID, err := primitive.ObjectIDFromHex(roomIDStr)
+	if err != nil {
+		http.Error(w, "Invalid room ID format", http.StatusBadRequest)
+		return
+	}
+
+	// 解析請求體
+	var req AddParticipantsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("JSON decode error: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// 查找現有聊天室
+	existingRoom, err := database.FindChatRoomByID(roomID) // 使用 GetChatRoomByID
+	if err != nil {
+		log.Printf("Error finding chatroom %s: %v", roomID.Hex(), err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if existingRoom == nil {
+		http.Error(w, "Chat room not found", http.StatusNotFound)
+		return
+	}
+
+	// 將新的參與者ID字串轉換為ObjectID
+	var newParticipantObjectIDs []primitive.ObjectID
+	for _, idStr := range req.NewParticipantIDs {
+		objID, err := primitive.ObjectIDFromHex(idStr)
+		if err != nil {
+			http.Error(w, "Invalid new participant ID format", http.StatusBadRequest)
+			return
+		}
+		newParticipantObjectIDs = append(newParticipantObjectIDs, objID)
+	}
+
+	// 過濾掉已經在聊天室中的參與者
+	var actualNewParticipants []primitive.ObjectID
+	existingParticipantMap := make(map[primitive.ObjectID]bool)
+	for _, p := range existingRoom.Participants {
+		existingParticipantMap[p] = true
+	}
+
+	for _, newID := range newParticipantObjectIDs {
+		if !existingParticipantMap[newID] {
+			actualNewParticipants = append(actualNewParticipants, newID)
+		}
+	}
+
+	if len(actualNewParticipants) == 0 {
+		// 如果沒有新的參與者需要添加，則直接返回成功
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "No new participants to add"})
+		return
+	}
+
+	// 合併現有參與者和實際新加入的參與者
+	updatedParticipants := append(existingRoom.Participants, actualNewParticipants...)
+	utils.SortObjectIDs(updatedParticipants) // 保持參與者列表有序
+
+	// 更新聊天室到資料庫（只更新參與者列表和 updatedAt，名稱不變）
+	updatedRoom, err := database.UpdateChatRoom(roomID, updatedParticipants, existingRoom.Name)
+	if err != nil {
+		log.Printf("Error updating chatroom with new participants: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// --- 處理系統訊息 ---
+	// 獲取邀請者和新參與者的用戶名
+	var allUserIDsForMessage []primitive.ObjectID
+	allUserIDsForMessage = append(allUserIDsForMessage, userID)                   // 邀請者 ID
+	allUserIDsForMessage = append(allUserIDsForMessage, actualNewParticipants...) // 被邀請者 ID
+
+	users, err := database.GetUsersByIDs(allUserIDsForMessage)
+	if err != nil {
+		log.Printf("Error getting users for system message: %v", err)
+		// 即使獲取用戶名失敗，也應該返回成功，只是系統訊息可能顯示為「未知使用者」
+	}
+
+	inviterUsername := "未知使用者"
+	newParticipantUsernames := []string{}
+	for _, user := range users {
+		if user.ID == userID {
+			inviterUsername = user.Username
+		} else {
+			// 確保只包含實際被添加的用戶名
+			for _, newP := range actualNewParticipants {
+				if user.ID == newP {
+					newParticipantUsernames = append(newParticipantUsernames, user.Username)
+					break
+				}
+			}
+		}
+	}
+
+	// 根據被邀請人數決定訊息內容
+	systemMessageContent := ""
+	if len(newParticipantUsernames) == 1 {
+		systemMessageContent = inviterUsername + " 已邀請 " + newParticipantUsernames[0] + " 加入群組。"
+	} else if len(newParticipantUsernames) > 1 {
+		systemMessageContent = inviterUsername + " 已邀請 " + strings.Join(newParticipantUsernames, "、") + " 加入群組。"
+	}
+
+	if systemMessageContent != "" {
+		systemMessage := models.Message{
+			Type:           models.MessageTypeSystem,
+			RoomID:         roomID.Hex(),
+			RoomName:       updatedRoom.Name,
+			SenderID:       primitive.NilObjectID, // 系統訊息的 SenderID 設置為空
+			SenderUsername: "系統訊息",                // 系統訊息的發送者名稱
+			Content:        systemMessageContent,
+			Timestamp:      time.Now(),
+			IsRead:         false, // 系統訊息通常不需要已讀狀態
+		}
+		// 存儲系統消息
+		_, err = database.InsertMessage(systemMessage)
+		if err != nil {
+			log.Printf("Error inserting system invite message: %v", err)
+		}
+
+		// 廣播系統訊息給所有連接到該聊天室的客戶端
+		websocket.GlobalHub.Broadcast <- systemMessage
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(updatedRoom)
 }
 
 // UpdateChatRoom 處理更新聊天室的請求

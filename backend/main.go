@@ -45,10 +45,11 @@ func main() {
 	router.Handle("/users", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetAllUsers))).Methods("GET")
 
 	// 聊天室相關路由 (需要登入才能操作)
-router.Handle("/chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
-router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms))).Methods("GET")
-router.Handle("/chatrooms/{id}", middleware.JWTMiddleware(http.HandlerFunc(handlers.UpdateChatRoom))).Methods("PUT")
-router.Handle("/chatrooms/{id}/leave", middleware.JWTMiddleware(http.HandlerFunc(handlers.LeaveChatRoom))).Methods("POST")
+	router.Handle("/chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
+	router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms))).Methods("GET")
+	router.Handle("/chatrooms/{id}", middleware.JWTMiddleware(http.HandlerFunc(handlers.UpdateChatRoom))).Methods("PUT")
+	router.Handle("/chatrooms/{id}/leave", middleware.JWTMiddleware(http.HandlerFunc(handlers.LeaveChatRoom))).Methods("POST")
+	router.Handle("/chatrooms/{id}/participants", middleware.JWTMiddleware(http.HandlerFunc(handlers.AddParticipants))).Methods("PUT")
 
 	// WebSocket 路由 (WebSocket 連線通常通過 URL 參數或 Cookies 進行認證，而不是 Authorization Header)
 	// 如果你的 WebSocket 連接在 URL 中傳遞了 token，可能需要在 HandleConnections 內部進行驗證
@@ -64,7 +65,7 @@ router.Handle("/chatrooms/{id}/leave", middleware.JWTMiddleware(http.HandlerFunc
 	// 實際生產環境中，你應該將 AllowedOrigins 限制為你的前端網域
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173"},
-AllowedMethods:   []string{"GET", "POST", "PUT", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,
 	})
