@@ -1,6 +1,7 @@
 // src/pages/HomePage.tsx
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import type { ChatRoom, User, Message } from "../types/index";
 import {
   AppShell,
   Burger,
@@ -32,32 +33,6 @@ import {
   IconPhoto,
   IconDotsVertical,
 } from "@tabler/icons-react";
-
-interface ChatRoom {
-  id: string;
-  name: string;
-  creatorId: string;
-  participants: User[];
-  createdAt: string;
-}
-
-interface User {
-  id: string;
-  username: string;
-  email?: string; // 將 email 設為可選
-}
-
-// 定義訊息類型，與後端 models.Message 保持一致
-interface Message {
-  id?: string; // 後端生成
-  type?: "normal" | "system"; // 消息類型
-  senderId: string;
-  senderUsername: string;
-  roomId: string; // 聊天室ID
-  roomName: string; // 聊天室名稱
-  content: string;
-  timestamp: string; // ISO 格式日期字串
-}
 
 function HomePage() {
   const navigate = useNavigate();

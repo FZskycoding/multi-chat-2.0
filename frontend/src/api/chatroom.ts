@@ -1,20 +1,7 @@
 // frontend/src/api/chatroom.ts
 import { notifications } from "@mantine/notifications";
 import { getUserSession } from "../utils/utils_auth"; // 確保導入正確的路徑
-
-// 定義與後端 ChatRoom 模型相符的介面
-export interface ChatRoom {
-  id: string; // 後端 ObjectId 轉換後的字串
-  name: string;
-  creatorId: string;
-  // 假設後端會返回參與者的完整資訊，如果只返回 ID，則需要額外處理
-  participants: Array<{
-    id: string;
-    username: string;
-    email?: string; // 可選
-  }>;
-  createdAt: string; // ISO 格式日期字串
-}
+import type { ChatRoom } from "../types/index";
 
 /**
  * 獲取當前使用者所有聊天室的列表

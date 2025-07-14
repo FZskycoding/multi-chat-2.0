@@ -1,12 +1,7 @@
 // src/api/user.ts
 import { notifications } from "@mantine/notifications";
 import { getUserSession } from "../utils/utils_auth";
-
-interface User {
-  id: string;
-  username: string;
-  email: string;
-}
+import type { User } from "../types/index";
 
 //回傳一個裝著 User 陣列的 Promise
 export const getAllUsers = async (): Promise<User[]> => {

@@ -98,12 +98,6 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		// 為了確保順序一致性，對參與者 ID 進行排序
 		sortedParticipantIDs := make([]primitive.ObjectID, len(participantObjectIDs))
 		copy(sortedParticipantIDs, participantObjectIDs)
-		// 這裡需要一個穩健的排序方法，例如轉換為字串後排序
-		// 簡單起見，假設 primitive.ObjectID 可以直接比較或使用其 Hex() 字串比較
-		// 實際應用中，可能需要自定義排序邏輯
-		// For now, we'll rely on the database's $all operator which doesn't care about order.
-		// However, for FindChatRoomByParticipants to work consistently, the input array should be sorted.
-		// Let's sort by Hex string for consistency.
 		utils.SortObjectIDs(sortedParticipantIDs) // 假設 utils.SortObjectIDs 存在並能正確排序
 
 		existingRoom, err := database.FindChatRoomByParticipants(sortedParticipantIDs)
