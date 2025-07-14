@@ -8,31 +8,23 @@ import {
   Group,
   Text,
   Button,
-  rem,
-  Avatar,
-  UnstyledButton,
   ScrollArea,
   Divider,
   Paper,
   Title,
   Stack,
-  TextInput,
-  ActionIcon,
-  Menu,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { getUserSession, clearUserSession } from "../utils/utils_auth";
-import { getAllUsers } from "../api/user";
-import { createOrGetChatRoom, getUserChatRooms, leaveChatRoom } from "../api/chatroom";
-import {
-  IconMessageCircle,
-  IconLogout,
-  IconUserCircle,
-  IconSend,
-  IconPhoto,
-  IconDotsVertical,
-} from "@tabler/icons-react";
+import { getAllUsers } from "../api/api_user";
+import { createOrGetChatRoom, getUserChatRooms, leaveChatRoom } from "../api/api_chatroom";
+import UserList from "../components/lists/UserList";
+import ChatRoomList from "../components/lists/ChatRoomList";
+import ChatMessages from "../components/chat/ChatMessages";
+import MessageInput from "../components/chat/MessageInput";
+import AppHeader from "../components/common/AppHeader";
+import WelcomeMessage from "../components/common/WelcomeMessage";
 
 function HomePage() {
   const navigate = useNavigate();
@@ -397,117 +389,22 @@ function HomePage() {
       <AppShell.Header>
         <Group h="100%" px="md">
           <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-          <Group justify="space-between" style={{ flex: 1 }}>
-            <Text size="xl" fw={700}>
-              GoChat
-            </Text>
-            <Group>
-              <Text fw={500}>歡迎，{userSession.username}！</Text>
-              <Button
-                variant="light"
-                onClick={handleLogout}
-                leftSection={<IconLogout size={16} />}
-              >
-                登出
-              </Button>
-            </Group>
-          </Group>
+          <AppHeader username={userSession.username} onLogout={handleLogout}/>
         </Group>
       </AppShell.Header>
 
       <AppShell.Navbar p="md">
         <ScrollArea h="calc(100vh - var(--app-shell-header-height) - var(--app-shell-footer-height, 0px))">
           <Stack gap="md">
-            {/* 移除「建立新聊天室」按鈕，因為現在是點擊使用者建立 */}
+            <ChatRoomList
+              chatRooms={chatRooms}
+              selectedRoomId={selectedRoom?.id || null}
+              onSelectRoom={handleSelectRoom}
+              onLeaveRoom={handleLeaveRoom}
+              // userSession={userSession} // 如果 ChatRoomList 內部需要 userSession 的細節，可以傳遞
+            />
 
-            <div>
-              <Text size="lg" fw={600} mb="md">
-                聊天室列表
-              </Text>
-              <Divider mb="sm" />
-              {chatRooms?.length === 0 ? (
-                <Text c="dimmed" size="sm" mb="md">
-                  尚無聊天室。請從下方選擇使用者建立聊天室。
-                </Text>
-              ) : (
-                <Stack gap="md">
-                  {chatRooms.map((room) => (
-                    <Group key={room.id} wrap="nowrap" justify="space-between">
-                      <UnstyledButton
-                        onClick={() => handleSelectRoom(room)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          padding: rem(10),
-                          borderRadius: "var(--mantine-radius-sm)",
-                          backgroundColor:
-                            selectedRoom?.id === room.id
-                              ? "var(--mantine-color-blue-0)"
-                              : "transparent",
-                          flex: 1,
-                        }}
-                      >
-                        <Avatar color="blue" radius="xl">
-                          <IconMessageCircle size={24} />
-                        </Avatar>
-                        <Text ml="md" fw={500}>
-                          {room.name}
-                        </Text>
-                      </UnstyledButton>
-                      <Menu>
-                        <Menu.Target>
-                          <ActionIcon variant="subtle" color="gray">
-                            <IconDotsVertical size={16} />
-                          </ActionIcon>
-                        </Menu.Target>
-                        <Menu.Dropdown>
-                          <Menu.Item
-                            color="red"
-                            leftSection={<IconLogout size={14} />}
-                            onClick={() => handleLeaveRoom(room)}
-                          >
-                            退出聊天室
-                          </Menu.Item>
-                        </Menu.Dropdown>
-                      </Menu>
-                    </Group>
-                  ))}
-                </Stack>
-              )}
-            </div>
-
-            <div>
-              <Text size="lg" fw={600} mb="md">
-                所有使用者
-              </Text>
-              <Divider mb="sm" />
-              {allUsers.length === 0 ? (
-                <Text c="dimmed">沒有其他使用者。</Text>
-              ) : (
-                <Stack gap="md">
-                  {allUsers.map((user) => (
-                    <UnstyledButton
-                      key={user.id}
-                      onClick={() => startChatWithUser(user)} // 點擊使用者建立/加入聊天室
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        padding: rem(10),
-                        borderRadius: "var(--mantine-radius-sm)",
-                        backgroundColor: "transparent",
-                      }}
-                    >
-                      <Avatar color="gray" radius="xl">
-                        <IconUserCircle size={24} />
-                      </Avatar>
-                      <Text ml="md" fw={500}>
-                        {user.username}
-                      </Text>
-                    </UnstyledButton>
-                  ))}
-                </Stack>
-              )}
-            </div>
+            <UserList users={allUsers} onStartChat={startChatWithUser} />
           </Stack>
         </ScrollArea>
       </AppShell.Navbar>
@@ -532,118 +429,25 @@ function HomePage() {
               </Button>
             </Group>
             <Divider mb="md" />
-            {/* 聊天訊息顯示區域 */}
-            <ScrollArea style={{ flex: 1, marginBottom: rem(10) }}>
-              <Stack>
-                {selectedRoom &&
-                  messages.get(selectedRoom.id)?.map((msg, index) => (
-                    <Group
-                      key={index}
-                      justify={
-                        msg.senderId === userSession.id
-                          ? "flex-end"
-                          : "flex-start"
-                      }
-                    >
-                      {msg.type === "system" ? (
-                        <Paper
-                          p="xs"
-                          radius="md"
-                          w="20%"
-                          bg="var(--mantine-color-gray-1)"
-                          style={{ textAlign: "center", margin: "0 auto" }}
-                        >
-                          <Text size="sm" c="dimmed">
-                            {msg.content}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {new Date(msg.timestamp).toLocaleTimeString()}
-                          </Text>
-                        </Paper>
-                      ) : (
-                        <Paper
-                          p="xs"
-                          radius="md"
-                          shadow="xs"
-                          bg={
-                            msg.senderId === userSession.id
-                              ? "#c3efab" //淺綠色
-                              : "#cde2ff" //淺藍色
-                          }
-                          style={{ maxWidth: "70%" }}
-                        >
-                          <Text size="xs" c="dark">
-                            {msg.senderUsername} (
-                            {new Date(msg.timestamp).toLocaleTimeString()})
-                          </Text>
-                          <Text>{msg.content}</Text>
-                        </Paper>
-                      )}
-                    </Group>
-                  ))}
-                <div ref={messagesEndRef} /> {/* 滾動錨點 */}
-              </Stack>
-            </ScrollArea>
 
-            {/* 訊息輸入框和發送按鈕 */}
-            <Group wrap="nowrap" align="flex-end">
-              <ActionIcon
-                size="xl"
-                variant="light"
-                color="gray"
-                aria-label="Upload Image"
-                disabled
-              >
-                <IconPhoto size={24} />
-              </ActionIcon>
-              <TextInput
-                style={{ flex: 1 }}
-                placeholder="輸入訊息..."
-                value={messageInput}
-                onChange={(event) => setMessageInput(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                size="md"
-              />
-              <Button
-                size="md"
-                onClick={handleSendMessage}
-                leftSection={<IconSend size={18} />}
-              >
-                發送
-              </Button>
-            </Group>
+            <ChatMessages
+              messages={messages.get(selectedRoom.id) || []}
+              userSessionId={userSession.id}
+              messagesEndRef={messagesEndRef} // 傳遞 ref
+            />
+
+            <MessageInput
+              messageInput={messageInput}
+              onMessageInputChange={setMessageInput}
+              onSendMessage={handleSendMessage}
+              isDisabled={
+                !selectedRoom || !ws || ws.readyState !== WebSocket.OPEN
+              }
+            />
           </Paper>
         ) : (
           // 首頁內容 - 提示選擇聊天室
-          <Paper
-            p="xl"
-            shadow="sm"
-            radius="md"
-            style={{
-              height: "calc(100vh - 100px)",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <Title order={2} ta="center" mb="md">
-              歡迎使用 GoChat
-            </Title>
-            <Text c="dimmed" ta="center">
-              您可以從左側選擇使用者來建立或加入聊天室。
-            </Text>
-            <IconMessageCircle
-              size={100}
-              color="var(--mantine-color-gray-4)"
-              style={{ marginTop: rem(40) }}
-            />
-          </Paper>
+          <WelcomeMessage/>
         )}
       </AppShell.Main>
     </AppShell>
