@@ -311,6 +311,32 @@ function HomePage() {
     [openInviteModal]
   );
 
+  // 處理邀請成功後的邏輯，更新聊天室列表
+  const handleInviteSuccess = useCallback(
+    (updatedChatRoom: ChatRoom) => {
+      notifications.show({
+        title: "邀請成功",
+        message: "新成員已加入聊天室！",
+        color: "green",
+      });
+      // 更新現有的聊天室列表，用更新後的聊天室替換舊的
+      setChatRooms((prevRooms) =>
+        prevRooms.map((room) =>
+          room.id === updatedChatRoom.id ? updatedChatRoom : room
+        )
+      );
+      // 如果當前選中的聊天室是被更新的聊天室，也要更新 selectedRoom
+      if (selectedRoom?.id === updatedChatRoom.id) {
+        setSelectedRoom(updatedChatRoom);
+      }
+      // 因為 backend 會發送 system 訊息， WebSocket 的 onmessage 會觸發 fetchChatRooms()
+      // 但為了立即更新前端的 chatRooms 列表，這裡也進行一次更新。
+      // 或者可以簡化為只依賴 WebSocket 的系統訊息來觸發 fetchChatRooms。
+      // 但為了即時性，直接更新 state 會更好。
+    },
+    [selectedRoom]
+  );
+
   // 處理退出聊天室
   const handleLeaveRoom = useCallback(
     async (room: ChatRoom) => {
@@ -421,8 +447,6 @@ function HomePage() {
       <AppShell.Navbar p="md">
         <ScrollArea h="calc(100vh - var(--app-shell-header-height) - var(--app-shell-footer-height, 0px))">
           <Stack gap="md">
-            
-
             <ChatRoomList
               chatRooms={chatRooms}
               selectedRoomId={selectedRoom?.id || null}
@@ -485,16 +509,7 @@ function HomePage() {
           onClose={closeInviteModal}
           chatRoom={chatRoomToInvite}
           allUsers={allUsers} // 傳遞所有用戶列表
-          // 目前不傳遞邀請相關的處理函數，因為功能還沒實現
-          onInvite={() => {
-            notifications.show({
-              title: "提示",
-              message: "邀請功能正在開發中...",
-              color: "yellow",
-              autoClose: 1500,
-            });
-            closeInviteModal();
-          }}
+          onInviteSuccess={handleInviteSuccess}
         />
       )}
     </AppShell>

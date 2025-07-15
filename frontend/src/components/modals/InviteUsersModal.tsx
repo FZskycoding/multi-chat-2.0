@@ -10,16 +10,19 @@ import {
   Group,
   Button,
   Divider,
+  Loader,
 } from "@mantine/core";
 import { IconSearch } from "@tabler/icons-react";
+import { notifications } from "@mantine/notifications";
 import type { User, ChatRoom } from "../../types"; // 引入 User 和 ChatRoom 類型
+import { addParticipantsToChatRoom } from "../../api/api_chatroom";
 
 interface InviteUsersModalProps {
   opened: boolean;
   onClose: () => void;
   chatRoom: ChatRoom; // 要邀請用戶進入的聊天室
   allUsers: User[]; // 所有註冊用戶的列表
-  onInvite: (selectedUserIds: string[], roomId: string) => void; // 假設的邀請處理函數 (暫時不實作)
+  onInviteSuccess: (updatedChatRoom: ChatRoom) => void;
 }
 
 const InviteUsersModal: React.FC<InviteUsersModalProps> = ({
@@ -27,10 +30,11 @@ const InviteUsersModal: React.FC<InviteUsersModalProps> = ({
   onClose,
   chatRoom,
   allUsers,
-  onInvite, // 暫時未實作功能
+  onInviteSuccess, 
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   // 過濾掉已經在聊天室內的用戶，並根據搜尋詞過濾
   const availableUsers = useMemo(() => {
@@ -38,11 +42,9 @@ const InviteUsersModal: React.FC<InviteUsersModalProps> = ({
       return [];
     }
 
-    // 確保 participantIds 是有效的字串集合
-    // 這裡增加一層過濾，確保每個 participant 都有有效的 id
     const participantIds = new Set(
       chatRoom.participants.filter(
-        (id) => typeof id === "string" && id.length > 0 // 確保 ID 是有效的字串
+        (id) => typeof id === "string" && id.length > 0 
       )
     );
 
@@ -67,6 +69,50 @@ const InviteUsersModal: React.FC<InviteUsersModalProps> = ({
         ? prev.filter((id) => id !== userId)
         : [...prev, userId]
     );
+  };
+
+  const handleInvite = async () => {
+    if (selectedUserIds.length === 0) {
+      notifications.show({
+        title: "提示",
+        message: "請選擇至少一位用戶進行邀請。",
+        color: "yellow",
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // 呼叫後端 API
+      const updatedRoom = await addParticipantsToChatRoom(
+        chatRoom.id,
+        selectedUserIds
+      );
+
+      notifications.show({
+        title: "成功",
+        message: "邀請已送出，用戶已加入聊天室。",
+        color: "green",
+      });
+      onInviteSuccess(updatedRoom); // 傳遞更新後的聊天室資訊給父組件
+      onClose(); // 關閉 Modal
+      // 清空選中狀態和搜尋詞
+      setSelectedUserIds([]);
+      setSearchTerm("");
+    } catch (error: unknown) {
+      console.error("邀請失敗:", error);
+      let errorMessage = "邀請失敗";
+      if (error instanceof Error) {
+        errorMessage = `邀請失敗: ${error.message}`;
+      }
+      notifications.show({
+        title: "錯誤",
+        message: errorMessage,
+        color: "red",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -130,16 +176,14 @@ const InviteUsersModal: React.FC<InviteUsersModalProps> = ({
           取消
         </Button>
         <Button
-          onClick={() => {
-            // 目前只觸發提示，功能尚未實作
-            onInvite(selectedUserIds, chatRoom.id);
-            // 清空選中狀態和搜尋詞
-            setSelectedUserIds([]);
-            setSearchTerm("");
-          }}
-          disabled={selectedUserIds.length === 0} // 沒有選中用戶時禁用
+          onClick={handleInvite}
+          disabled={selectedUserIds.length === 0 || isLoading}
         >
-          邀請 ({selectedUserIds.length})
+          {isLoading ? (
+            <Loader size="sm" color="white" />
+          ) : (
+            `邀請 (${selectedUserIds.length})`
+          )}
         </Button>
       </Group>
     </Modal>

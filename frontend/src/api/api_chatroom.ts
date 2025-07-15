@@ -2,6 +2,7 @@
 import { notifications } from "@mantine/notifications";
 import { getUserSession } from "../utils/utils_auth"; // 確保導入正確的路徑
 import type { ChatRoom } from "../types/index";
+const API_BASE_URL = "http://localhost:8080";
 
 /**
  * 獲取當前使用者所有聊天室的列表
@@ -206,3 +207,37 @@ export async function createOrGetChatRoom(
     return null;
   }
 }
+
+// 新增邀請參與者到聊天室的 API 函數
+export const addParticipantsToChatRoom = async (
+  roomId: string,
+  newParticipantIds: string[]
+): Promise<ChatRoom> => {
+  // 從 getUserSession 獲取整個使用者會話物件，其中包含 token
+  const userSession = getUserSession();
+
+  // 檢查 userSession 和 token 是否存在
+  if (!userSession || !userSession.token) {
+    // 抛出更具描述性的錯誤
+    throw new Error("Authentication token not found. Please log in.");
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/chatrooms/${roomId}/participants`,
+    {
+      method: "PUT", // 後端定義的是 PUT 方法
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${userSession.token}`, // <-- 使用從 userSession 獲取的 token
+      },
+      body: JSON.stringify({ newParticipantIds }), // 注意這裡的 key 必須與後端 AddParticipantsRequest 匹配
+    }
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || "Failed to add participants.");
+  }
+
+  return response.json(); // 後端應返回更新後的 ChatRoom 物件
+};
