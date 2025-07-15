@@ -18,13 +18,18 @@ import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { getUserSession, clearUserSession } from "../utils/utils_auth";
 import { getAllUsers } from "../api/api_user";
-import { createOrGetChatRoom, getUserChatRooms, leaveChatRoom } from "../api/api_chatroom";
+import {
+  createOrGetChatRoom,
+  getUserChatRooms,
+  leaveChatRoom,
+} from "../api/api_chatroom";
 import UserList from "../components/lists/UserList";
 import ChatRoomList from "../components/lists/ChatRoomList";
 import ChatMessages from "../components/chat/ChatMessages";
 import MessageInput from "../components/chat/MessageInput";
 import AppHeader from "../components/common/AppHeader";
 import WelcomeMessage from "../components/common/WelcomeMessage";
+import InviteUsersModal from "../components/modals/InviteUsersModal"; // 引入新的邀請 Modal 組件
 
 function HomePage() {
   const navigate = useNavigate();
@@ -36,6 +41,14 @@ function HomePage() {
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [messageInput, setMessageInput] = useState("");
   const [messages, setMessages] = useState<Map<string, Message[]>>(new Map()); // 聊天訊息列表，按聊天室ID分組
+  // 邀請 Modal 相關狀態
+  const [
+    isInviteModalOpen,
+    { open: openInviteModal, close: closeInviteModal },
+  ] = useDisclosure(false);
+  const [chatRoomToInvite, setChatRoomToInvite] = useState<ChatRoom | null>(
+    null
+  );
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const notificationShownRef = useRef(false);
@@ -289,37 +302,49 @@ function HomePage() {
     }
   };
 
-  // 處理退出聊天室
-  const handleLeaveRoom = useCallback(async (room: ChatRoom) => {
-    try {
-      const success = await leaveChatRoom(room.id);
-      
-      if (success) {
-        // 關閉 WebSocket 連接
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.close();
-        }
-        
-        // 從聊天室列表中移除
-        setChatRooms(prev => prev.filter(r => r.id !== room.id));
-        
-        // 如果正在查看此聊天室，則導向首頁
-        if (selectedRoom?.id === room.id) {
-          setSelectedRoom(null);
-        }
+  // 處理邀請按鈕點擊事件
+  const handleInviteClick = useCallback(
+    (room: ChatRoom) => {
+      setChatRoomToInvite(room); // 設定當前要邀請的聊天室
+      openInviteModal(); // 開啟邀請 Modal
+    },
+    [openInviteModal]
+  );
 
-        // 顯示通知
-        notifications.show({
-          title: "已退出聊天室",
-          message: `您已成功退出聊天室：${room.name}`,
-          color: "blue",
-          autoClose: 1500,
-        });
+  // 處理退出聊天室
+  const handleLeaveRoom = useCallback(
+    async (room: ChatRoom) => {
+      try {
+        const success = await leaveChatRoom(room.id);
+
+        if (success) {
+          // 關閉 WebSocket 連接
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.close();
+          }
+
+          // 從聊天室列表中移除
+          setChatRooms((prev) => prev.filter((r) => r.id !== room.id));
+
+          // 如果正在查看此聊天室，則導向首頁
+          if (selectedRoom?.id === room.id) {
+            setSelectedRoom(null);
+          }
+
+          // 顯示通知
+          notifications.show({
+            title: "已退出聊天室",
+            message: `您已成功退出聊天室：${room.name}`,
+            color: "blue",
+            autoClose: 1500,
+          });
+        }
+      } catch (error) {
+        console.error("Error leaving room:", error);
       }
-    } catch (error) {
-      console.error("Error leaving room:", error);
-    }
-  }, [ws, selectedRoom]);
+    },
+    [ws, selectedRoom]
+  );
 
   // 關閉聊天室
   const exitChat = () => {
@@ -389,18 +414,21 @@ function HomePage() {
       <AppShell.Header>
         <Group h="100%" px="md">
           <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-          <AppHeader username={userSession.username} onLogout={handleLogout}/>
+          <AppHeader username={userSession.username} onLogout={handleLogout} />
         </Group>
       </AppShell.Header>
 
       <AppShell.Navbar p="md">
         <ScrollArea h="calc(100vh - var(--app-shell-header-height) - var(--app-shell-footer-height, 0px))">
           <Stack gap="md">
+            
+
             <ChatRoomList
               chatRooms={chatRooms}
               selectedRoomId={selectedRoom?.id || null}
               onSelectRoom={handleSelectRoom}
               onLeaveRoom={handleLeaveRoom}
+              onInviteClick={handleInviteClick}
               // userSession={userSession} // 如果 ChatRoomList 內部需要 userSession 的細節，可以傳遞
             />
 
@@ -447,9 +475,28 @@ function HomePage() {
           </Paper>
         ) : (
           // 首頁內容 - 提示選擇聊天室
-          <WelcomeMessage/>
+          <WelcomeMessage />
         )}
       </AppShell.Main>
+      {/* 邀請用戶 Modal */}
+      {chatRoomToInvite && ( // 確保有選中的聊天室才渲染 Modal
+        <InviteUsersModal
+          opened={isInviteModalOpen}
+          onClose={closeInviteModal}
+          chatRoom={chatRoomToInvite}
+          allUsers={allUsers} // 傳遞所有用戶列表
+          // 目前不傳遞邀請相關的處理函數，因為功能還沒實現
+          onInvite={() => {
+            notifications.show({
+              title: "提示",
+              message: "邀請功能正在開發中...",
+              color: "yellow",
+              autoClose: 1500,
+            });
+            closeInviteModal();
+          }}
+        />
+      )}
     </AppShell>
   );
 }

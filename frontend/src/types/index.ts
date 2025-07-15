@@ -2,7 +2,7 @@ export interface ChatRoom {
   id: string;
   name: string;
   creatorId: string;
-  participants: User[];
+  participants: string[];
   createdAt: string;
 }
 

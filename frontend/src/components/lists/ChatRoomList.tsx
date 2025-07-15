@@ -15,9 +15,9 @@ import {
   IconMessageCircle,
   IconLogout,
   IconDotsVertical,
-  IconUserPlus, // 引入 IconUserPlus
+  IconUserPlus, 
 } from "@tabler/icons-react";
-import { notifications } from "@mantine/notifications"; // 如果需要內部顯示通知
+
 import type { ChatRoom } from "../../types"; // 注意路徑，確保 ChatRoom 類型已定義
 
 interface ChatRoomListProps {
@@ -25,7 +25,8 @@ interface ChatRoomListProps {
   selectedRoomId: string | null;
   onSelectRoom: (room: ChatRoom) => void;
   onLeaveRoom: (room: ChatRoom) => void;
-  // 如果未來需要處理邀請，可以考慮加入 onInviteClick: (room: ChatRoom) => void;
+  // 新增 onInviteClick 屬性
+  onInviteClick: (room: ChatRoom) => void;
 }
 
 const ChatRoomList: React.FC<ChatRoomListProps> = ({
@@ -33,6 +34,7 @@ const ChatRoomList: React.FC<ChatRoomListProps> = ({
   selectedRoomId,
   onSelectRoom,
   onLeaveRoom,
+  onInviteClick, // 接收 onInviteClick
 }) => {
   return (
     <div>
@@ -82,12 +84,7 @@ const ChatRoomList: React.FC<ChatRoomListProps> = ({
                     onClick={() => {
                       // 這裡可以觸發一個 props 傳入的 onInviteClick 函式
                       // 或者像現在這樣，先顯示一個通知
-                      notifications.show({
-                        title: "邀請功能",
-                        message: `邀請功能尚未實作，針對聊天室：${room.name}。`,
-                        color: "blue",
-                        autoClose: 1500,
-                      });
+                      onInviteClick(room);
                     }}
                   >
                     邀請
