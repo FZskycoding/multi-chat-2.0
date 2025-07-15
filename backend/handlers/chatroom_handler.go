@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort" // 引入 sort 套件用於排序使用者名稱
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ type CreateChatRoomRequest struct {
 }
 
 // UpdateChatRoomRequest 定義更新聊天室的請求體
+// 此結構體在當前命名邏輯下可能不會直接用於更新名稱，但保留以防其他用途
 type UpdateChatRoomRequest struct {
 	ParticipantIDs []string `json:"participantIds"` // 新的參與者列表
 }
@@ -31,22 +33,33 @@ type AddParticipantsRequest struct {
 	NewParticipantIDs []string `json:"newParticipantIds"` // 新增參與者的使用者 ID 字串列表
 }
 
-// 根據用戶ID獲取用戶名稱列表
+// getUsernames 根據用戶ID獲取用戶名稱列表
 func getUsernames(userIDs []primitive.ObjectID) ([]string, error) {
-	usernames := make([]string, 0, len(userIDs))
-	for _, id := range userIDs {
-		user, err := database.GetUserByID(id)
-		if err != nil {
-			return nil, err
-		}
+	if len(userIDs) == 0 {
+		return []string{}, nil
+	}
+
+	users, err := database.GetUsersByIDs(userIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	usernames := make([]string, 0, len(users))
+	for _, user := range users {
 		usernames = append(usernames, user.Username)
 	}
+
+	// 選擇性：對用戶名進行排序，確保聊天室名稱的順序一致性
+	sort.Strings(usernames)
 	return usernames, nil
 }
 
 // generateRoomName 根據參與者生成聊天室名稱
 func generateRoomName(participantUsernames []string) string {
-	return strings.Join(participantUsernames, "、") + "的聊天室"
+	if len(participantUsernames) == 0 {
+		return "空聊天室" // 或者其他預設名稱
+	}
+	return strings.Join(participantUsernames, "、") + " 的聊天室"
 }
 
 // CreateChatRoom 處理創建聊天室的請求
@@ -58,8 +71,8 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 驗證請求參數
-	if len(req.ParticipantIDs) < 2 {
-		http.Error(w, "At least two participants are required", http.StatusBadRequest)
+	if len(req.ParticipantIDs) < 1 { // 至少需要一個參與者（創建者自己）
+		http.Error(w, "At least one participant is required", http.StatusBadRequest)
 		return
 	}
 
@@ -81,7 +94,7 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		participantObjectIDs = append(participantObjectIDs, objID)
 	}
 
-	// 確保創建者也在參與者列表中
+	// 確保創建者也在參與者列表中，避免重複添加
 	foundCreator := false
 	for _, pID := range participantObjectIDs {
 		if pID == creatorID {
@@ -93,25 +106,23 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		participantObjectIDs = append(participantObjectIDs, creatorID)
 	}
 
-	// 檢查是否已存在相同參與者的聊天室 (針對兩人聊天室的特殊處理)
-	if len(participantObjectIDs) == 2 {
-		// 為了確保順序一致性，對參與者 ID 進行排序
-		sortedParticipantIDs := make([]primitive.ObjectID, len(participantObjectIDs))
-		copy(sortedParticipantIDs, participantObjectIDs)
-		utils.SortObjectIDs(sortedParticipantIDs) // 假設 utils.SortObjectIDs 存在並能正確排序
+	// 為了確保順序一致性，對參與者 ID 進行排序
+	// 這對於 FindChatRoomByParticipants 判斷是否存在相同兩人聊天室非常關鍵
+	utils.SortObjectIDs(participantObjectIDs) // 假設 utils.SortObjectIDs 存在並能正確排序
 
-		existingRoom, err := database.FindChatRoomByParticipants(sortedParticipantIDs)
-		if err != nil {
-			log.Printf("Error checking for existing chatroom: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-		if existingRoom != nil {
-			// 如果已存在，則直接返回該聊天室資訊
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(existingRoom)
-			return
-		}
+	// 檢查是否已存在相同參與者的聊天室 (針對所有參與者群組)
+	// 此處修改為對所有參與者數量進行檢查，而非僅限於兩人聊天室
+	existingRoom, err := database.FindChatRoomByParticipants(participantObjectIDs)
+	if err != nil {
+		log.Printf("Error checking for existing chatroom: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if existingRoom != nil {
+		// 如果已存在，則直接返回該聊天室資訊
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(existingRoom)
+		return
 	}
 
 	// 獲取所有參與者的用戶名
@@ -124,7 +135,7 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 
 	// 創建新的聊天室物件，使用生成的名稱
 	newChatRoom := models.ChatRoom{
-		Name:         generateRoomName(usernames),
+		Name:         generateRoomName(usernames), // 使用生成的名稱
 		CreatorID:    creatorID,
 		Participants: participantObjectIDs,
 		CreatedAt:    time.Now(),
@@ -167,10 +178,8 @@ func GetUserChatRooms(w http.ResponseWriter, r *http.Request) {
 
 // LeaveChatRoom 處理使用者退出聊天室的請求
 func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
-	// 設置響應類型
 	w.Header().Set("Content-Type", "application/json")
 
-	// 從URL路徑參數獲取聊天室ID
 	vars := mux.Vars(r)
 	roomIDStr := vars["id"]
 	if roomIDStr == "" {
@@ -184,14 +193,12 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 從JWT token中獲取使用者ID
 	userID, err := utils.GetUserIDFromContext(r.Context())
 	if err != nil {
 		http.Error(w, "Unauthorized: User ID not found in context", http.StatusUnauthorized)
 		return
 	}
 
-	// 獲取當前聊天室
 	room, err := database.FindChatRoomByID(roomID)
 	if err != nil {
 		log.Printf("Error getting chatroom: %v", err)
@@ -211,18 +218,23 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 創建用於系統訊息的聊天室名稱變數
+	var finalRoomNameForMessage string = room.Name // 預設為舊名稱
+
 	// 更新聊天室的參與者列表
 	if len(newParticipants) > 0 {
 		// 獲取剩餘參與者的用戶名
 		usernames, err := getUsernames(newParticipants)
 		if err != nil {
-			log.Printf("Error getting usernames: %v", err)
+			log.Printf("Error getting usernames for updated room name: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
+		newRoomName := generateRoomName(usernames)
+		finalRoomNameForMessage = newRoomName // 如果更新，使用新名稱
 
 		// 更新聊天室
-		_, err = database.UpdateChatRoom(roomID, newParticipants, generateRoomName(usernames))
+		_, err = database.UpdateChatRoom(roomID, newParticipants, newRoomName)
 		if err != nil {
 			log.Printf("Error updating chatroom: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -236,14 +248,14 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
+		// 如果聊天室被刪除，finalRoomNameForMessage 仍使用舊名稱表示離開了哪個房間
 	}
 
 	// 獲取退出使用者的用戶名和創建系統消息
 	exitingUser, err := database.GetUserByID(userID)
 	if err != nil {
 		log.Printf("Error getting exiting user: %v", err)
-		// 如果無法獲取用戶名，使用備用訊息
-		exitingUser = &models.User{Username: "某人"}
+		exitingUser = &models.User{Username: "某人"} // 如果無法獲取用戶名，使用備用訊息
 	}
 
 	// 創建並發送系統消息
@@ -252,7 +264,7 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 		SenderID:       userID,
 		SenderUsername: "系統訊息",
 		RoomID:         roomID.Hex(),
-		RoomName:       room.Name,
+		RoomName:       finalRoomNameForMessage, // 使用更新或舊的聊天室名稱
 		Content:        exitingUser.Username + " 已離開聊天室",
 		Timestamp:      time.Now(),
 		IsRead:         true,
@@ -305,7 +317,7 @@ func AddParticipants(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 查找現有聊天室
-	existingRoom, err := database.FindChatRoomByID(roomID) // 使用 GetChatRoomByID
+	existingRoom, err := database.FindChatRoomByID(roomID)
 	if err != nil {
 		log.Printf("Error finding chatroom %s: %v", roomID.Hex(), err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -352,8 +364,17 @@ func AddParticipants(w http.ResponseWriter, r *http.Request) {
 	updatedParticipants := append(existingRoom.Participants, actualNewParticipants...)
 	utils.SortObjectIDs(updatedParticipants) // 保持參與者列表有序
 
-	// 更新聊天室到資料庫（只更新參與者列表和 updatedAt，名稱不變）
-	updatedRoom, err := database.UpdateChatRoom(roomID, updatedParticipants, existingRoom.Name)
+	// 生成新的聊天室名稱
+	allParticipantsUsernames, err := getUsernames(updatedParticipants)
+	if err != nil {
+		log.Printf("Error getting usernames for new room name: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	newRoomName := generateRoomName(allParticipantsUsernames)
+
+	// 更新聊天室到資料庫（更新參與者列表、名稱和 updatedAt）
+	updatedRoom, err := database.UpdateChatRoom(roomID, updatedParticipants, newRoomName) // 傳遞新的名稱
 	if err != nil {
 		log.Printf("Error updating chatroom with new participants: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -400,7 +421,7 @@ func AddParticipants(w http.ResponseWriter, r *http.Request) {
 		systemMessage := models.Message{
 			Type:           models.MessageTypeSystem,
 			RoomID:         roomID.Hex(),
-			RoomName:       updatedRoom.Name,
+			RoomName:       updatedRoom.Name,      // 使用更新後的聊天室名稱
 			SenderID:       primitive.NilObjectID, // 系統訊息的 SenderID 設置為空
 			SenderUsername: "系統訊息",                // 系統訊息的發送者名稱
 			Content:        systemMessageContent,
@@ -408,10 +429,15 @@ func AddParticipants(w http.ResponseWriter, r *http.Request) {
 			IsRead:         false, // 系統訊息通常不需要已讀狀態
 		}
 		// 存儲系統消息
-		_, err = database.InsertMessage(systemMessage)
-		if err != nil {
-			log.Printf("Error inserting system invite message: %v", err)
-		}
+		insertResult, err := database.InsertMessage(systemMessage) // 獲取 InsertResult
+    if err != nil {
+        log.Printf("Error inserting system invite message: %v", err)
+    } else {
+        // 如果插入成功，更新 systemMessage 的 ID
+        systemMessage.ID = insertResult.InsertedID.(primitive.ObjectID)
+    }
+
+    log.Printf("System Message ID before broadcast: %s", systemMessage.ID.Hex())
 
 		// 廣播系統訊息給所有連接到該聊天室的客戶端
 		websocket.GlobalHub.Broadcast <- systemMessage
@@ -423,8 +449,8 @@ func AddParticipants(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateChatRoom 處理更新聊天室的請求
+// 在此新命名邏輯下，此函數可能不再用於直接更新名稱，但可用於更新其他屬性
 func UpdateChatRoom(w http.ResponseWriter, r *http.Request) {
-	// 設置響應類型
 	w.Header().Set("Content-Type", "application/json")
 
 	var req UpdateChatRoomRequest
@@ -433,7 +459,6 @@ func UpdateChatRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 從URL路徑參數獲取聊天室ID
 	vars := mux.Vars(r)
 	roomIDStr := vars["id"]
 	if roomIDStr == "" {
@@ -447,7 +472,6 @@ func UpdateChatRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 檢查聊天室是否存在
 	existingRoom, err := database.FindChatRoomByID(roomID)
 	if err != nil {
 		log.Printf("Error getting chatroom: %v", err)
@@ -459,7 +483,6 @@ func UpdateChatRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 將參與者ID字串轉換為ObjectID
 	var participantObjectIDs []primitive.ObjectID
 	for _, idStr := range req.ParticipantIDs {
 		objID, err := primitive.ObjectIDFromHex(idStr)
@@ -470,16 +493,17 @@ func UpdateChatRoom(w http.ResponseWriter, r *http.Request) {
 		participantObjectIDs = append(participantObjectIDs, objID)
 	}
 
-	// 獲取所有參與者的用戶名
+	// 根據新的參與者列表生成名稱
 	usernames, err := getUsernames(participantObjectIDs)
 	if err != nil {
 		log.Printf("Error getting usernames: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+	newRoomName := generateRoomName(usernames)
 
 	// 更新聊天室
-	updatedRoom, err := database.UpdateChatRoom(roomID, participantObjectIDs, generateRoomName(usernames))
+	updatedRoom, err := database.UpdateChatRoom(roomID, participantObjectIDs, newRoomName)
 	if err != nil {
 		log.Printf("Error updating chatroom: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

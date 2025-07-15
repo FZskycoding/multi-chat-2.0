@@ -42,12 +42,12 @@ func main() {
 
 	// --- 需要 JWT 驗證的路由 ---
 	// 獲取所有使用者 API 路由 (需要登入才能看)
-	router.Handle("/users", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetAllUsers))).Methods("GET")
+	router.Handle("/all-users", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetAllUsers))).Methods("GET")
 
 	// 聊天室相關路由 (需要登入才能操作)
-	router.Handle("/chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
+	router.Handle("/creat-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
 	router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms))).Methods("GET")
-	router.Handle("/chatrooms/{id}", middleware.JWTMiddleware(http.HandlerFunc(handlers.UpdateChatRoom))).Methods("PUT")
+	router.Handle("/chatrooms/{id}/update", middleware.JWTMiddleware(http.HandlerFunc(handlers.UpdateChatRoom))).Methods("PUT")
 	router.Handle("/chatrooms/{id}/leave", middleware.JWTMiddleware(http.HandlerFunc(handlers.LeaveChatRoom))).Methods("POST")
 	router.Handle("/chatrooms/{id}/participants", middleware.JWTMiddleware(http.HandlerFunc(handlers.AddParticipants))).Methods("PUT")
 

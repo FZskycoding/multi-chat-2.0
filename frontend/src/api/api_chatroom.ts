@@ -20,7 +20,7 @@ export async function getUserChatRooms(): Promise<ChatRoom[]> {
   }
 
   try {
-    const response = await fetch("http://localhost:8080/user-chatrooms", {
+    const response = await fetch(`${API_BASE_URL}/user-chatrooms`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -74,7 +74,7 @@ export async function updateChatRoom(
   }
 
   try {
-    const response = await fetch(`http://localhost:8080/chatrooms/${roomId}`, {
+    const response = await fetch(`${API_BASE_URL}/chatrooms/${roomId}/update`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -106,12 +106,6 @@ export async function updateChatRoom(
 }
 
 /**
- * 創建或獲取一個聊天室
- * @param {string[]} participantIds - 參與者的 ID 列表 (例如 [使用者A的ID, 使用者B的ID])
- * @param {string} name - 聊天室名稱
- * @returns {Promise<ChatRoom | null>} 創建或獲取的聊天室物件
- */
-/**
  * 退出聊天室
  * @param {string} roomId - 要退出的聊天室ID
  * @returns {Promise<boolean>} 退出成功返回true，失敗返回false
@@ -128,12 +122,12 @@ export async function leaveChatRoom(roomId: string): Promise<boolean> {
   }
 
   try {
-    const response = await fetch(`http://localhost:8080/chatrooms/${roomId}/leave`, {
+    const response = await fetch(`${API_BASE_URL}/chatrooms/${roomId}/leave`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${userSession.token}`,
-      }
+      },
     });
 
     if (!response.ok) {
@@ -157,9 +151,13 @@ export async function leaveChatRoom(roomId: string): Promise<boolean> {
   }
 }
 
-export async function createOrGetChatRoom(
-  participantIds: string[],
-  name: string
+/**
+ * 創建或獲取一個聊天室
+ * @param {string[]} participantIds - 參與者的 ID 列表 (例如 [使用者A的ID, 使用者B的ID])
+ * @returns {Promise<ChatRoom | null>} 創建或獲取的聊天室物件
+ */
+export async function createChatRoom( //
+  participantIds: string[] //
 ): Promise<ChatRoom | null> {
   const userSession = getUserSession();
   if (!userSession || !userSession.token) {
@@ -172,14 +170,14 @@ export async function createOrGetChatRoom(
   }
 
   try {
-    const response = await fetch("http://localhost:8080/chatrooms", {
-      method: "POST",
+    const response = await fetch(`${API_BASE_URL}/creat-chatrooms`, {
+      //
+      method: "POST", //
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${userSession.token}`,
+        "Content-Type": "application/json", //
+        Authorization: `Bearer ${userSession.token}`, //
       },
       body: JSON.stringify({
-        name,
         participantIds,
       }),
     });
@@ -189,15 +187,15 @@ export async function createOrGetChatRoom(
       throw new Error(errorData.error || "無法建立或獲取聊天室");
     }
 
-    const data: ChatRoom = await response.json();
-    return data;
+    const data: ChatRoom = await response.json(); //
+    return data; //
   } catch (error: unknown) {
     // 將 any 改為 unknown
-    console.error("Error creating or getting chat room:", error);
-    let errorMessage = "建立/獲取聊天室失敗";
+    console.error("Error creating or getting chat room:", error); //
+    let errorMessage = "建立/獲取聊天室失敗"; //
     if (error instanceof Error) {
       // 判斷是否為 Error 實例
-      errorMessage = `建立/獲取聊天室失敗: ${error.message}`;
+      errorMessage = `建立/獲取聊天室失敗: ${error.message}`; //
     }
     notifications.show({
       title: "錯誤",

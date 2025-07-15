@@ -19,7 +19,7 @@ import { notifications } from "@mantine/notifications";
 import { getUserSession, clearUserSession } from "../utils/utils_auth";
 import { getAllUsers } from "../api/api_user";
 import {
-  createOrGetChatRoom,
+  createChatRoom,
   getUserChatRooms,
   leaveChatRoom,
 } from "../api/api_chatroom";
@@ -40,7 +40,8 @@ function HomePage() {
   const [selectedRoom, setSelectedRoom] = useState<ChatRoom | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [messageInput, setMessageInput] = useState("");
-  const [messages, setMessages] = useState<Map<string, Message[]>>(new Map()); // 聊天訊息列表，按聊天室ID分組
+  const [messages, setMessages] = useState(new Map<string, Message[]>()); // 聊天訊息列表，按聊天室ID分組
+
   // 邀請 Modal 相關狀態
   const [
     isInviteModalOpen,
@@ -79,13 +80,13 @@ function HomePage() {
         const rooms = await getUserChatRooms();
         setChatRooms(rooms || []); // 確保總是設置為陣列
       } catch (error) {
-        console.error("Error fetching chat rooms:", error);
+        console.error("Error fetching user chat rooms:", error);
         setChatRooms([]); // 錯誤時設置為空陣列
       }
     };
 
-    fetchUserChatRooms();
     fetchAllUsers();
+    fetchUserChatRooms();
   }, [userSession, navigate]);
 
   // 訊息列表更新時滾動到底部
@@ -94,23 +95,74 @@ function HomePage() {
   }, [messages]);
 
   // WebSocket 訊息處理
-  const handleWsMessage = useCallback((event: MessageEvent) => {
-    const receivedMessage: Message = JSON.parse(event.data);
-    // console.log("receivedMessage: ", receivedMessage);
-    setMessages((prevMessagesMap) => {
-      const newMap = new Map(prevMessagesMap);
-      const roomMessages = newMap.get(receivedMessage.roomId) || [];
-      const isDuplicate = roomMessages.some(
-        (msg) => msg.id === receivedMessage.id
-      );
+  const handleWsMessage = useCallback(
+    (event: MessageEvent) => {
+      const receivedMessage: Message = JSON.parse(event.data);
+      console.log("WebSocket received message:", receivedMessage);
 
-      if (!isDuplicate) {
-        newMap.set(receivedMessage.roomId, [...roomMessages, receivedMessage]);
-      }
-      // console.log("更新後的 messages Map:", newMap);
-      return newMap;
-    });
-  }, []);
+      // --- 處理聊天室名稱更新 (不論訊息類型) ---
+      // 這個邏輯在訊息被添加到聊天歷史之前執行
+      setChatRooms((prevChatRooms) => {
+        let hasChanged = false;
+        const updatedChatRooms = prevChatRooms.map((room) => {
+          if (
+            room.id === receivedMessage.roomId &&
+            room.name !== receivedMessage.roomName
+          ) {
+            hasChanged = true;
+            return { ...room, name: receivedMessage.roomName }; // 更新名稱
+          }
+          return room;
+        });
+
+        if (hasChanged) {
+          console.log("聊天室名稱已更新")
+          // 如果當前選中的聊天室是被更新的，同步更新 selectedRoom 的名稱
+          setSelectedRoom((prevSelectedRoom) => {
+            if (
+              prevSelectedRoom &&
+              prevSelectedRoom.id === receivedMessage.roomId
+            ) {
+              return { ...prevSelectedRoom, name: receivedMessage.roomName };
+            }
+            return prevSelectedRoom;
+          });
+        }
+        return updatedChatRooms;
+      });
+      // --- 結束聊天室名稱更新邏輯 ---
+
+      // --- 處理聊天訊息 (所有類型訊息都添加到聊天歷史中) ---
+      // 由於用戶需要看到系統訊息，我們不再過濾 'system' 類型的訊息。
+      setMessages((prevMessagesMap) => {
+        const newMap = new Map(prevMessagesMap);
+        const roomMessages = newMap.get(receivedMessage.roomId) || [];
+        const isDuplicate = roomMessages.some(
+          (msg) => msg.id === receivedMessage.id
+        );
+
+        if (!isDuplicate) {
+          newMap.set(receivedMessage.roomId, [
+            ...roomMessages,
+            receivedMessage,
+          ]);
+          console.log(
+            "Message added to newMap for roomId",
+            receivedMessage.roomId,
+            "."
+          );
+        } else {
+          console.log(
+            "Message skipped due to duplicate ID:",
+            receivedMessage.id
+          );
+        }
+        console.log("After setMessages, current map:", newMap); // 第二次新增的日誌
+        return newMap;
+      });
+    },
+    [] // 依賴項為空，因為內部處理了狀態更新
+  );
 
   // WebSocket 連線關閉處理
   const handleWsClose = useCallback((event: CloseEvent) => {
@@ -203,7 +255,8 @@ function HomePage() {
           throw new Error("Failed to fetch chat history");
         }
         const data = await response.json();
-        return data.messages;
+        // 用戶需要看到系統訊息，因此不再過濾訊息類型
+        return data.messages; // 不再過濾，返回所有訊息
       } catch (error) {
         console.error(`Error fetching chat history for room ${roomId}:`, error);
         notifications.show({
@@ -247,12 +300,8 @@ function HomePage() {
     if (!userSession) return;
 
     try {
-      const roomName = `${userSession.username}、${targetUser.username} 的聊天室`;
-      // 使用 API 創建或獲取聊天室
-      const room = await createOrGetChatRoom(
-        [userSession.id, targetUser.id],
-        roomName
-      );
+      // 使用 API 創建或獲取聊天室，只傳遞 participantIds
+      const room = await createChatRoom([userSession.id, targetUser.id]);
 
       if (!room) {
         notifications.show({
@@ -271,11 +320,12 @@ function HomePage() {
         if (!exists) {
           return [...prev, room];
         }
-        return prev;
+        // 如果存在，則用新的 room 物件替換，確保名稱是最新
+        return prev.map((r) => (r.id === room.id ? room : r));
       });
 
       setSelectedRoom(room); // 設定選中的聊天室
-      connectWebSocket(room.id, room.name); // 連接到該聊天室的 WebSocket
+      connectWebSocket(room.id, room.name); // 連接到該聊天室的 WebSocket，room.name 現在來自後端
 
       // 獲取歷史聊天記錄
       const messages = await fetchChatHistory(room.id);
@@ -329,10 +379,7 @@ function HomePage() {
       if (selectedRoom?.id === updatedChatRoom.id) {
         setSelectedRoom(updatedChatRoom);
       }
-      // 因為 backend 會發送 system 訊息， WebSocket 的 onmessage 會觸發 fetchChatRooms()
-      // 但為了立即更新前端的 chatRooms 列表，這裡也進行一次更新。
-      // 或者可以簡化為只依賴 WebSocket 的系統訊息來觸發 fetchChatRooms。
-      // 但為了即時性，直接更新 state 會更好。
+      // 後端會發送 system 訊息，WebSocket 的 onmessage 會處理名稱更新，所以這裡只需更新一次列表。
     },
     [selectedRoom]
   );
@@ -417,6 +464,7 @@ function HomePage() {
       roomId: selectedRoom.id,
       roomName: selectedRoom.name,
       content: messageInput,
+      type: "normal", // 明確設定為 normal 訊息
     };
 
     ws.send(JSON.stringify(messageToSend));
