@@ -4,6 +4,7 @@ export interface ChatRoom {
   creatorId: string;
   participants: string[];
   createdAt: string;
+  updatedAt: string; // Add updatedAt
 }
 
 export interface User {
@@ -15,7 +16,7 @@ export interface User {
 // 定義訊息類型，與後端 models.Message 保持一致
 export interface Message {
   id?: string; // 後端生成
-  type?: "normal" | "system"; // 消息類型
+  type?: "normal" | "system" | "room_state_update"; // 消息類型，新增 room_state_update
   senderId: string;
   senderUsername: string;
   roomId: string; // 聊天室ID
