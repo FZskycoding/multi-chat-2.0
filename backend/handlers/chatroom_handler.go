@@ -280,6 +280,26 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 		// 繼續執行，不中斷流程
 	}
 
+	roomUpdateMessage := models.Message{
+		Type:           models.MessageTypeUpdate, // 使用更新消息類型
+		RoomID:         roomID.Hex(),
+		RoomName:       finalRoomNameForMessage, // 使用更新或舊的聊天室名稱
+		SenderID:       primitive.NilObjectID,   // 系統訊息的 SenderID 設置為空
+		SenderUsername: "系統更新",                 // 區分於邀請通知
+		Content:        "聊天室成員或名稱已更新。",         // 可以是任意通知內容，客戶端主要依賴類型判斷
+		Timestamp:      time.Now(),
+		IsRead:         true, // 通常不需要已讀狀態
+	}
+	// 存儲系統消息
+	roomUpdateMessageResult, err := database.InsertMessage(roomUpdateMessage)
+	if err != nil {
+		log.Printf("Error inserting system update message on leave: %v", err)
+	} else {
+		// 如果插入成功，更新 roomUpdateMessage 的 ID
+		roomUpdateMessage.ID = roomUpdateMessageResult.InsertedID.(primitive.ObjectID)
+	}
+	websocket.GlobalHub.Broadcast <- roomUpdateMessage // 廣播隱藏的更新消息
+
 	// 返回成功狀態
 	response := map[string]bool{"success": true}
 	json.NewEncoder(w).Encode(response)
@@ -429,15 +449,35 @@ func AddParticipants(w http.ResponseWriter, r *http.Request) {
 			IsRead:         false, // 系統訊息通常不需要已讀狀態
 		}
 		// 存儲系統消息
-		insertResult, err := database.InsertMessage(systemMessage) // 獲取 InsertResult
-    if err != nil {
-        log.Printf("Error inserting system invite message: %v", err)
-    } else {
-        // 如果插入成功，更新 systemMessage 的 ID
-        systemMessage.ID = insertResult.InsertedID.(primitive.ObjectID)
-    }
+		systemMessageResult, err := database.InsertMessage(systemMessage) // 獲取 InsertResult
+		if err != nil {
+			log.Printf("Error inserting system invite message: %v", err)
+		} else {
+			// 如果插入成功，更新 systemMessage 的 ID
+			systemMessage.ID = systemMessageResult.InsertedID.(primitive.ObjectID)
+		}
 
-    log.Printf("System Message ID before broadcast: %s", systemMessage.ID.Hex())
+		log.Printf("System Message ID before broadcast: %s", systemMessage.ID.Hex())
+
+		roomUpdateMessage := models.Message{
+			Type:           models.MessageTypeUpdate, // 使用新的更新消息類型
+			RoomID:         roomID.Hex(),
+			RoomName:       updatedRoom.Name,
+			SenderID:       primitive.NilObjectID, // 系統訊息的 SenderID 設置為空
+			SenderUsername: "系統更新",                // 區分於邀請通知
+			Content:        "聊天室成員或名稱已更新。",        // 可以是任意通知內容，客戶端主要依賴類型判斷
+			Timestamp:      time.Now(),
+			IsRead:         true, // 通常不需要已讀狀態
+		}
+		// 存儲系統消息
+		roomUpdateMessageResult, err := database.InsertMessage(roomUpdateMessage) // 獲取 InsertResult
+		if err != nil {
+			log.Printf("Error inserting system update message: %v", err)
+		} else {
+			// 如果插入成功，更新 systemMessage 的 ID
+			roomUpdateMessage.ID = roomUpdateMessageResult.InsertedID.(primitive.ObjectID)
+		}
+		websocket.GlobalHub.Broadcast <- roomUpdateMessage // 廣播隱藏的更新消息
 
 		// 廣播系統訊息給所有連接到該聊天室的客戶端
 		websocket.GlobalHub.Broadcast <- systemMessage

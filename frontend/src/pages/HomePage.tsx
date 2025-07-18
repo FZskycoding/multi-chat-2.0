@@ -54,42 +54,38 @@ function HomePage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const notificationShownRef = useRef(false);
 
-  // 滾動到最新訊息
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   // 獲取所有使用者列表
+  const fetchAllUsers = useCallback(async () => {
+    const users = await getAllUsers();
+    if (userSession) {
+      setAllUsers(users.filter((u: User) => u.id !== userSession!.id));
+    }
+  }, [userSession]);
+
+  // 獲取使用者的聊天室列表
+  const fetchUserChatRooms = useCallback(async () => {
+    try {
+      const rooms = await getUserChatRooms();
+      setChatRooms(rooms || []);
+    } catch (error) {
+      console.error("Error fetching user chat rooms:", error);
+      setChatRooms([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!userSession) {
       navigate("/auth");
       return;
     }
-
-    // 獲取所有使用者
-    const fetchAllUsers = async () => {
-      const users = await getAllUsers();
-      if (userSession) {
-        setAllUsers(users.filter((u: User) => u.id !== userSession!.id));
-      }
-    };
-
-    // 獲取使用者的聊天室列表
-    const fetchUserChatRooms = async () => {
-      try {
-        const rooms = await getUserChatRooms();
-        setChatRooms(rooms || []); // 確保總是設置為陣列
-      } catch (error) {
-        console.error("Error fetching user chat rooms:", error);
-        setChatRooms([]); // 錯誤時設置為空陣列
-      }
-    };
-
     fetchAllUsers();
     fetchUserChatRooms();
-  }, [userSession, navigate]);
+  }, [userSession, navigate, fetchAllUsers, fetchUserChatRooms]); // 添加依賴項
 
-  // 訊息列表更新時滾動到底部
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
@@ -98,7 +94,7 @@ function HomePage() {
   const handleWsMessage = useCallback(
     (event: MessageEvent) => {
       const receivedMessage: Message = JSON.parse(event.data);
-      console.log("WebSocket received message:", receivedMessage);
+      // console.log("WebSocket received message:", receivedMessage); 
 
       // --- 處理聊天室名稱更新 (不論訊息類型) ---
       // 這個邏輯在訊息被添加到聊天歷史之前執行
@@ -110,14 +106,13 @@ function HomePage() {
             room.name !== receivedMessage.roomName
           ) {
             hasChanged = true;
-            return { ...room, name: receivedMessage.roomName }; // 更新名稱
+            return { ...room, name: receivedMessage.roomName };
           }
           return room;
         });
 
         if (hasChanged) {
-          console.log("聊天室名稱已更新")
-          // 如果當前選中的聊天室是被更新的，同步更新 selectedRoom 的名稱
+          console.log("聊天室名稱已更新");
           setSelectedRoom((prevSelectedRoom) => {
             if (
               prevSelectedRoom &&
@@ -132,8 +127,16 @@ function HomePage() {
       });
       // --- 結束聊天室名稱更新邏輯 ---
 
+      // *** 新增：處理 room_state_update 訊息類型，重新獲取聊天室列表和所有使用者列表 ***
+      if (receivedMessage.type === "room_state_update") {
+        console.log(
+          "收到 room_state_update 訊息，重新獲取聊天室列表和所有使用者。"
+        );
+        fetchUserChatRooms(); // 重新獲取聊天室列表以更新參與者資訊
+        fetchAllUsers(); // 重新獲取所有使用者列表以確保用戶資訊最新
+      }
+
       // --- 處理聊天訊息 (所有類型訊息都添加到聊天歷史中) ---
-      // 由於用戶需要看到系統訊息，我們不再過濾 'system' 類型的訊息。
       setMessages((prevMessagesMap) => {
         const newMap = new Map(prevMessagesMap);
         const roomMessages = newMap.get(receivedMessage.roomId) || [];
@@ -146,22 +149,22 @@ function HomePage() {
             ...roomMessages,
             receivedMessage,
           ]);
-          console.log(
-            "Message added to newMap for roomId",
-            receivedMessage.roomId,
-            "."
-          );
+          // console.log(
+          //   "Message added to newMap for roomId",
+          //   receivedMessage.roomId,
+          //   "."
+          // );
         } else {
           console.log(
             "Message skipped due to duplicate ID:",
             receivedMessage.id
           );
         }
-        console.log("After setMessages, current map:", newMap); // 第二次新增的日誌
+        console.log("After setMessages, current map:", newMap);
         return newMap;
       });
     },
-    [] // 依賴項為空，因為內部處理了狀態更新
+    [fetchUserChatRooms, fetchAllUsers] // 添加依賴項
   );
 
   // WebSocket 連線關閉處理
