@@ -70,20 +70,17 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 驗證請求參數
-	if len(req.ParticipantIDs) < 1 { // 至少需要一個參與者（創建者自己）
+	if len(req.ParticipantIDs) < 1 {
 		http.Error(w, "At least one participant is required", http.StatusBadRequest)
 		return
 	}
 
-	// 從 JWT token 中獲取創建者 ID
 	creatorID, err := utils.GetUserIDFromContext(r.Context())
 	if err != nil {
 		http.Error(w, "Unauthorized: Creator ID not found in context", http.StatusUnauthorized)
 		return
 	}
 
-	// 將參與者 ID 字串轉換為 primitive.ObjectID
 	var participantObjectIDs []primitive.ObjectID
 	for _, idStr := range req.ParticipantIDs {
 		objID, err := primitive.ObjectIDFromHex(idStr)
@@ -94,7 +91,6 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		participantObjectIDs = append(participantObjectIDs, objID)
 	}
 
-	// 確保創建者也在參與者列表中，避免重複添加
 	foundCreator := false
 	for _, pID := range participantObjectIDs {
 		if pID == creatorID {
@@ -106,12 +102,8 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		participantObjectIDs = append(participantObjectIDs, creatorID)
 	}
 
-	// 為了確保順序一致性，對參與者 ID 進行排序
-	// 這對於 FindChatRoomByParticipants 判斷是否存在相同兩人聊天室非常關鍵
-	utils.SortObjectIDs(participantObjectIDs) // 假設 utils.SortObjectIDs 存在並能正確排序
+	utils.SortObjectIDs(participantObjectIDs)
 
-	// 檢查是否已存在相同參與者的聊天室 (針對所有參與者群組)
-	// 此處修改為對所有參與者數量進行檢查，而非僅限於兩人聊天室
 	existingRoom, err := database.FindChatRoomByParticipants(participantObjectIDs)
 	if err != nil {
 		log.Printf("Error checking for existing chatroom: %v", err)
@@ -119,13 +111,11 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existingRoom != nil {
-		// 如果已存在，則直接返回該聊天室資訊
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(existingRoom)
 		return
 	}
 
-	// 獲取所有參與者的用戶名
 	usernames, err := getUsernames(participantObjectIDs)
 	if err != nil {
 		log.Printf("Error getting usernames: %v", err)
@@ -133,16 +123,14 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 創建新的聊天室物件，使用生成的名稱
 	newChatRoom := models.ChatRoom{
-		Name:         generateRoomName(usernames), // 使用生成的名稱
+		Name:         generateRoomName(usernames),
 		CreatorID:    creatorID,
 		Participants: participantObjectIDs,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
 
-	// 插入到資料庫
 	result, err := database.InsertChatRoom(newChatRoom)
 	if err != nil {
 		log.Printf("Error inserting new chatroom: %v", err)
@@ -151,6 +139,33 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newChatRoom.ID = result.InsertedID.(primitive.ObjectID)
+
+	// 【關鍵修正】在這裡補上 WebSocket 廣播
+	// 建立一個 room_state_update 類型的訊息
+	roomUpdateMessage := models.Message{
+		Type:           models.MessageTypeUpdate,
+		RoomID:         newChatRoom.ID.Hex(),
+		RoomName:       newChatRoom.Name,
+		SenderID:       primitive.NilObjectID, // 系統訊息 SenderID 為空
+		SenderUsername: "系統更新",
+		Content:        "聊天室已建立或更新。", // 內容不重要，前端主要依賴類型判斷
+		Timestamp:      time.Now(),
+		IsRead:         true,
+	}
+
+	// 為了持久化，可以選擇性地將這條更新訊息存入資料庫
+	// (如果不需要儲存，可以省略這段)
+	updateMsgResult, err := database.InsertMessage(roomUpdateMessage)
+	if err != nil {
+		log.Printf("Error inserting system update message on create: %v", err)
+	} else {
+		roomUpdateMessage.ID = updateMsgResult.InsertedID.(primitive.ObjectID)
+	}
+
+	// 透過 WebSocket 廣播給所有相關人員
+	websocket.GlobalHub.Broadcast <- roomUpdateMessage
+	log.Printf("Broadcasted room_state_update for new room %s", newChatRoom.ID.Hex())
+	// 修正結束
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

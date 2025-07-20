@@ -2,18 +2,18 @@ package websocket
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
 
-	"go-chat/backend/database" // 引入 database 套件
-	"go-chat/backend/models"   // 引入 models 套件
+	"go-chat/backend/database"
+	"go-chat/backend/models"
 
 	"github.com/gorilla/websocket"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// ... (ChatHistoryResponse 和 HandleChatHistory 保持不變) ...
 // ChatHistoryResponse 代表聊天記錄的回應結構
 type ChatHistoryResponse struct {
 	Messages []models.Message `json:"messages"`
@@ -49,41 +49,33 @@ func HandleChatHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 const (
-	// 將訊息寫入到遠端對等點的最長時間
-	writeWait = 10 * time.Second
-
-	// 允許從遠端對等點讀取下一個 pong 訊息的最長時間。
-	pongWait = 60 * time.Second
-
-	// 發送 ping 訊息給遠端對等點的週期。
-	pingPeriod = (pongWait * 9) / 10
-
-	// Maximum message size allowed from peer.
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 512
 )
 
-// upgrader 用於將 HTTP 連線升級為 WebSocket 連線
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// 設定true:允許所有來源的連線
 		return true
 	},
 }
 
 // Client 代表一個 WebSocket 客戶端
 type Client struct {
-	hub      *Hub                // 負責管理所有客戶端和訊息流
-	conn     *websocket.Conn     // WebSocket 連線物件，透過它來讀寫訊息
-	send     chan models.Message // 用於發送訊息的緩衝通道，類型改為 models.Message
+	hub      *Hub
+	conn     *websocket.Conn
+	send     chan models.Message
 	UserID   primitive.ObjectID
 	Username string
-	RoomID   string // 客戶端所在的聊天室ID
-	RoomName string // 客戶端所在的聊天室名稱
+	// 【修改】RoomID 和 RoomName 不再是必要項，僅表示用戶當前活躍的房間
+	ActiveRoomID   string
+	ActiveRoomName string
 }
 
-// 讀取用戶傳來的訊息，並丟給 Hub
+// readPump 讀取用戶傳來的訊息，並丟給 Hub
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
@@ -92,48 +84,65 @@ func (c *Client) readPump() {
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+
 	for {
 		_, p, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				log.Println("Client disconnected gracefully.")
+				log.Printf("Client %s disconnected gracefully.", c.UserID.Hex())
 			} else {
-				log.Printf("Error reading message: %v", err)
+				log.Printf("Error reading message for client %s: %v", c.UserID.Hex(), err)
 			}
 			break
 		}
 
-		// 解析收到的訊息為 models.Message
 		var msg models.Message
 		if err := json.Unmarshal(p, &msg); err != nil {
 			log.Printf("Error unmarshalling message: %v", err)
 			continue
 		}
 
-		// 填充發送者資訊、聊天室資訊和時間戳
+		// 填充發送者資訊和時間戳
 		msg.SenderID = c.UserID
 		msg.SenderUsername = c.Username
-		msg.RoomID = c.RoomID     // 從客戶端連線資訊獲取 RoomID
-		msg.RoomName = c.RoomName // 從客戶端連線資訊獲取 RoomName
 		msg.Timestamp = time.Now()
-		msg.Type = models.MessageTypeNormal // 設置為普通消息類型
+		// RoomID 和 RoomName 應該由客戶端發送訊息時提供，因為現在一個連線可能對應多個房間
+		// msg.Type 預設為 normal
 
-		// 將訊息儲存到資料庫並獲得結果
+		// 檢查 RoomID 是否有效
+		if msg.RoomID == "" {
+			log.Printf("Message from user %s missing RoomID", c.UserID.Hex())
+			continue
+		}
+
+		// 為了確保 RoomName 是最新的，我們從資料庫獲取
+		roomID, err := primitive.ObjectIDFromHex(msg.RoomID)
+		if err != nil {
+			log.Printf("Invalid RoomID format: %s", msg.RoomID)
+			continue
+		}
+
+		room, err := database.FindChatRoomByID(roomID)
+		if err != nil || room == nil {
+			log.Printf("Room not found or database error for RoomID: %s", msg.RoomID)
+			continue
+		}
+		msg.RoomName = room.Name
+
 		result, err := database.InsertMessage(msg)
 		if err != nil {
 			log.Printf("Error saving message to database: %v", err)
-			return
+			continue
 		}
 
-		// 設置訊息的 ID 為資料庫生成的唯一 ID
 		msg.ID = result.InsertedID.(primitive.ObjectID)
 
-		// 將包含 ID 的訊息廣播給所有客戶端
+		// 將帶有 ID 的完整訊息廣播出去
 		c.hub.Broadcast <- msg
 	}
 }
 
-// 接收 Hub 廣播來的訊息，丟給前端
+// writePump 保持不變
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -142,29 +151,20 @@ func (c *Client) writePump() {
 	}()
 	for {
 		select {
-		//負責處理從 Hub 或其他地方發送到 client.send 通道的實際聊天訊息，並將其傳送給客戶端瀏覽器。
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// 如果這個 channel 被關閉了（ok == false），就送出 CloseMessage
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-
-			// 將 models.Message(struct結構) 轉換為 JSON 格式發送
 			jsonMessage, err := json.Marshal(message)
 			if err != nil {
 				log.Printf("Error marshalling message: %v", err)
 				return
 			}
-
-			//c.conn.WriteMessage(發送文字訊息, 發送內容)
 			if err := c.conn.WriteMessage(websocket.TextMessage, jsonMessage); err != nil {
-				log.Printf("Error writing message: %v", err)
 				return
 			}
-
-		// 接收定時器以保持連線活躍並檢測客戶端是否仍在線。
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -174,23 +174,25 @@ func (c *Client) writePump() {
 	}
 }
 
-// Hub 維護所有活躍的 WebSocket 客戶端，並處理訊息的廣播
+// Hub 維護所有活躍的 WebSocket 客戶端
 type Hub struct {
-	clients       map[*Client]bool
-	clientsByRoom map[string]map[*Client]bool // 按聊天室ID索引的客戶端
-	Broadcast     chan models.Message
-	register      chan *Client
-	unregister    chan *Client
+	clients map[*Client]bool
+	// 【核心修改】不再按房間分組，而是按使用者 ID 索引，確保每個使用者只有一個連線
+	clientsByUserID map[primitive.ObjectID]*Client
+	Broadcast       chan models.Message
+	register        chan *Client
+	unregister      chan *Client
 }
 
 // NewHub 創建並返回一個新的 Hub 實例
 func NewHub() *Hub {
 	return &Hub{
-		Broadcast:     make(chan models.Message),
-		register:      make(chan *Client),
-		unregister:    make(chan *Client),
-		clients:       make(map[*Client]bool),
-		clientsByRoom: make(map[string]map[*Client]bool), // 初始化
+		Broadcast:  make(chan models.Message),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+		clients:    make(map[*Client]bool),
+		// 【核心修改】初始化新的 map
+		clientsByUserID: make(map[primitive.ObjectID]*Client),
 	}
 }
 
@@ -199,44 +201,62 @@ func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.clients[client] = true
-			if _, ok := h.clientsByRoom[client.RoomID]; !ok {
-				h.clientsByRoom[client.RoomID] = make(map[*Client]bool)
+			// 【核心修改】註冊邏輯
+			// 如果此 user ID 已有連線，先斷開舊的
+			if oldClient, ok := h.clientsByUserID[client.UserID]; ok {
+				log.Printf("User %s already connected, closing old connection.", client.UserID.Hex())
+				close(oldClient.send)
+				delete(h.clients, oldClient)
 			}
-			h.clientsByRoom[client.RoomID][client] = true
-			log.Printf("Client %s registered to room %s. Total clients in room: %d", client.UserID.Hex(), client.RoomID, len(h.clientsByRoom[client.RoomID]))
-			fmt.Println(client)
+			h.clients[client] = true
+			h.clientsByUserID[client.UserID] = client
+			log.Printf("Client %s (%s) registered. Total clients: %d", client.UserID.Hex(), client.Username, len(h.clients))
+
 		case client := <-h.unregister:
+			// 【核心修改】取消註冊邏輯
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
-				if _, ok := h.clientsByRoom[client.RoomID]; ok {
-					delete(h.clientsByRoom[client.RoomID], client)
-					if len(h.clientsByRoom[client.RoomID]) == 0 {
-						delete(h.clientsByRoom, client.RoomID) // 如果房間沒有客戶端了，就刪除房間
-					}
+				// 確保我們只刪除與當前 client 物件完全相同的連線
+				if h.clientsByUserID[client.UserID] == client {
+					delete(h.clientsByUserID, client.UserID)
 				}
 				close(client.send)
-				log.Printf("Client %s unregistered from room %s. Total clients in room: %d", client.UserID.Hex(), client.RoomID, len(h.clientsByRoom[client.RoomID]))
+				log.Printf("Client %s (%s) unregistered. Total clients: %d", client.UserID.Hex(), client.Username, len(h.clients))
 			}
+
 		case message := <-h.Broadcast:
-			// 廣播訊息到特定聊天室
-			if clientsInRoom, ok := h.clientsByRoom[message.RoomID]; ok {
-				// 針對聊天室內每一個用戶進行廣播
-				for client := range clientsInRoom {
+			// 【核心修改】廣播邏輯
+			roomID, err := primitive.ObjectIDFromHex(message.RoomID)
+			if err != nil {
+				log.Printf("Invalid RoomID in broadcast message: %s", message.RoomID)
+				continue
+			}
+
+			// 根據 RoomID 從資料庫查找聊天室，以獲取完整的參與者列表
+			room, err := database.FindChatRoomByID(roomID) //
+			if err != nil {
+				log.Printf("Error finding room for broadcast: %v", err)
+				continue
+			}
+			if room == nil {
+				log.Printf("Room %s not found for broadcasting", roomID.Hex())
+				continue
+			}
+
+			// 遍歷聊天室的所有參與者
+			for _, participantID := range room.Participants {
+				// 檢查參與者是否在線
+				if client, ok := h.clientsByUserID[participantID]; ok {
 					select {
 					case client.send <- message:
 					default:
+						// 如果發送失敗（通道已滿或關閉），則認為客戶端已離線
+						log.Printf("Client %s channel full or closed, unregistering.", client.UserID.Hex())
 						close(client.send)
-						delete(clientsInRoom, client)
-						if len(clientsInRoom) == 0 {
-							delete(h.clientsByRoom, message.RoomID)
-						}
-						delete(h.clients, client) // 從總客戶端列表中移除
-						log.Printf("Client channel is full, unregistered client %s from room %s", client.UserID.Hex(), client.RoomID)
+						delete(h.clients, client)
+						delete(h.clientsByUserID, client.UserID)
 					}
 				}
-			} else {
-				log.Printf("Room %s not found for broadcasting message.", message.RoomID)
 			}
 		}
 	}
@@ -245,35 +265,46 @@ func (h *Hub) Run() {
 // 全局 Hub 實例
 var GlobalHub = NewHub()
 
-// BroadcastMessage 廣播消息到指定的聊天室
+// BroadcastMessage 保持不變，它只是將訊息放入廣播通道
 func BroadcastMessage(message models.Message) {
-    GlobalHub.Broadcast <- message
+	GlobalHub.Broadcast <- message
 }
 
 // HandleConnections 處理 WebSocket 連線請求
 func HandleConnections(w http.ResponseWriter, r *http.Request) {
-	// 從 URL 查詢參數中獲取 UserID, Username, RoomID 和 RoomName
+	// 步驟 1: 記錄收到請求
+	log.Printf("DEBUG: New request to HandleConnections. Raw query: %s", r.URL.RawQuery)
+
+	// 步驟 2: 解析參數
 	userIDStr := r.URL.Query().Get("userId")
 	username := r.URL.Query().Get("username")
-	roomID := r.URL.Query().Get("roomId")
-	roomName := r.URL.Query().Get("roomName")
+	log.Printf("DEBUG: Parsed userId: '%s', username: '%s'", userIDStr, username)
 
-	if userIDStr == "" || username == "" || roomID == "" || roomName == "" {
-		http.Error(w, "User ID, username, room ID, and room name are required for WebSocket connection", http.StatusBadRequest)
+	// 步驟 3: 驗證參數是否為空
+	if userIDStr == "" || username == "" {
+		log.Println("ERROR: Connection rejected. Reason: User ID or username is empty.")
+		http.Error(w, "User ID and username are required for WebSocket connection", http.StatusBadRequest)
 		return
 	}
 
+	// 步驟 4: 驗證 User ID 格式
 	userID, err := primitive.ObjectIDFromHex(userIDStr)
 	if err != nil {
+		log.Printf("ERROR: Connection rejected. Reason: Invalid User ID format. Error: %v", err)
 		http.Error(w, "Invalid User ID format", http.StatusBadRequest)
 		return
 	}
 
+	// 步驟 5: 升級連線為 WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade to WebSocket: %v", err)
+		// upgrader.Upgrade 會自動寫入 HTTP 錯誤回應，所以這裡只需要記錄日誌
+		log.Printf("ERROR: Connection rejected. Reason: Failed to upgrade to WebSocket. Error: %v", err)
 		return
 	}
+
+	// 如果能執行到這裡，表示連線成功
+	log.Println("DEBUG: WebSocket upgrade successful. Proceeding to register client.")
 
 	client := &Client{
 		hub:      GlobalHub,
@@ -281,31 +312,9 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 		send:     make(chan models.Message, 256),
 		UserID:   userID,
 		Username: username,
-		RoomID:   roomID,
-		RoomName: roomName,
 	}
 	client.hub.register <- client
 
-	// 在單獨的 goroutine 中發送歷史訊息
-	go func() {
-		// 獲取最近的 50 條歷史訊息 (針對特定聊天室)
-		historicalMessages, err := database.GetChatHistory(client.RoomID)
-		if err != nil {
-			log.Printf("Error getting historical messages for room %s: %v", client.RoomID, err)
-			return
-		}
-
-		// 將歷史訊息發送給新連接的客戶端
-		for i := len(historicalMessages) - 1; i >= 0; i-- { // 反向發送以確保順序
-			select {
-			case client.send <- historicalMessages[i]:
-			case <-time.After(time.Second): // 防止阻塞(如果訊息放入時等待超過1秒鐘就return)
-				log.Printf("Timeout sending historical message to client %s in room %s", client.UserID.Hex(), client.RoomID)
-				return
-			}
-		}
-	}()
-
 	go client.writePump()
-	client.readPump() // readPump 會在連線關閉時自動取消註冊
+	client.readPump()
 }
