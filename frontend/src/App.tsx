@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import AuthPage from "./pages/AuthPage";
 import HomePage from "./pages/HomePage";

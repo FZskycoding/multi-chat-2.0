@@ -1,5 +1,5 @@
 // src/pages/HomePage.tsx
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ChatRoom, User, Message } from "../types/index";
 import {
