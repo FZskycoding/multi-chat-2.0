@@ -57,6 +57,19 @@ function HomePage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  const handleLogout = useCallback(
+    () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+      clearUserSession();
+      setUserSession(null);
+      navigate("/auth");
+    },
+    // 第二個參數：依賴陣列
+    [navigate]
+  );
+
   const fetchUserChatRooms = useCallback(async () => {
     try {
       const rooms = await getUserChatRooms();
@@ -90,7 +103,20 @@ function HomePage() {
     if (ws.current && ws.current.readyState < 2) {
       return;
     }
-    const websocketUrl = `ws://localhost:8080/ws?userId=${userSession.id}&username=${userSession.username}`;
+
+    // 檢查 userSession 和 token 是否存在
+    if (!userSession.token) {
+      console.error("WebSocket 連線失敗: 缺少 token。");
+      notifications.show({
+        title: "連線錯誤",
+        message: "無法建立安全連線，請重新登入。",
+        color: "red",
+      });
+      handleLogout(); // 強制登出
+      return;
+    }
+    // 使用 token 建立安全的 WebSocket URL
+    const websocketUrl = `ws://localhost:8080/ws?token=${userSession.token}`;
     const newWs = new WebSocket(websocketUrl);
     newWs.onopen = () => setIsConnected(true);
     newWs.onclose = () => setIsConnected(false);
@@ -152,27 +178,18 @@ function HomePage() {
         newWs.close();
       }
     };
-  }, [userSession, navigate, fetchUserChatRooms]);
+  }, [userSession, navigate, fetchUserChatRooms, handleLogout]);
 
   useEffect(() => {
     if (userSession) {
       fetchAllUsers();
       fetchUserChatRooms();
     }
-  }, [userSession, fetchAllUsers, fetchUserChatRooms]);
+  }, [userSession, fetchAllUsers, fetchUserChatRooms, handleLogout]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  const handleLogout = () => {
-    if (ws.current) {
-      ws.current.close();
-    }
-    clearUserSession();
-    setUserSession(null);
-    navigate("/auth");
-  };
 
   const fetchChatHistory = useCallback(
     async (roomId: string) => {
@@ -220,10 +237,13 @@ function HomePage() {
     [userSession, fetchUserChatRooms, fetchChatHistory]
   );
 
-  const handleInviteClick = useCallback((room: ChatRoom) => {
-    setChatRoomToInvite(room);
-    openInviteModal();
-  }, []);
+  const handleInviteClick = useCallback(
+    (room: ChatRoom) => {
+      setChatRoomToInvite(room);
+      openInviteModal();
+    },
+    [openInviteModal]
+  );
 
   const handleInviteSuccess = useCallback(
     (updatedChatRoom: ChatRoom) => {

@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"go-chat/backend/config"  
+	"go-chat/backend/utils"
 
 	"go-chat/backend/database"
 	"go-chat/backend/models"
@@ -272,49 +274,52 @@ func BroadcastMessage(message models.Message) {
 
 // HandleConnections 處理 WebSocket 連線請求
 func HandleConnections(w http.ResponseWriter, r *http.Request) {
-	// 步驟 1: 記錄收到請求
-	log.Printf("DEBUG: New request to HandleConnections. Raw query: %s", r.URL.RawQuery)
-
-	// 步驟 2: 解析參數
-	userIDStr := r.URL.Query().Get("userId")
-	username := r.URL.Query().Get("username")
-	log.Printf("DEBUG: Parsed userId: '%s', username: '%s'", userIDStr, username)
-
-	// 步驟 3: 驗證參數是否為空
-	if userIDStr == "" || username == "" {
-		log.Println("ERROR: Connection rejected. Reason: User ID or username is empty.")
-		http.Error(w, "User ID and username are required for WebSocket connection", http.StatusBadRequest)
+	// 步驟 1: 從 URL 查詢參數中獲取 token
+	tokenString := r.URL.Query().Get("token")
+	if tokenString == "" {
+		log.Println("ERROR: Connection rejected. Reason: Token is missing from URL query.")
+		http.Error(w, "Authentication token is required", http.StatusBadRequest)
 		return
 	}
 
-	// 步驟 4: 驗證 User ID 格式
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	// 步驟 2: 載入設定並驗證 JWT Token
+	cfg := config.LoadConfig()
+	userID, err := utils.GetUserIDFromToken(tokenString, cfg.JWTSecret)
 	if err != nil {
-		log.Printf("ERROR: Connection rejected. Reason: Invalid User ID format. Error: %v", err)
-		http.Error(w, "Invalid User ID format", http.StatusBadRequest)
+		log.Printf("ERROR: Connection rejected. Reason: Invalid Token. Error: %v", err)
+		http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 
-	// 步驟 5: 升級連線為 WebSocket
+	// 步驟 3: (更安全) 根據驗證後的 userID 從資料庫獲取使用者資訊
+	user, err := database.GetUserByID(userID)
+	if err != nil {
+		log.Printf("ERROR: Connection rejected. Reason: User not found in DB for ID %s. Error: %v", userID.Hex(), err)
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	
+	// 步驟 4: 升級 HTTP 連線為 WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		// upgrader.Upgrade 會自動寫入 HTTP 錯誤回應，所以這裡只需要記錄日誌
-		log.Printf("ERROR: Connection rejected. Reason: Failed to upgrade to WebSocket. Error: %v", err)
+		log.Printf("ERROR: Failed to upgrade connection for user %s. Error: %v", user.Username, err)
+		// upgrader.Upgrade 會自動回傳 HTTP 錯誤，所以這裡只需要記錄日誌
 		return
 	}
+    log.Printf("DEBUG: WebSocket upgrade successful for user %s (%s)", user.Username, user.ID.Hex())
 
-	// 如果能執行到這裡，表示連線成功
-	log.Println("DEBUG: WebSocket upgrade successful. Proceeding to register client.")
 
+	// 步驟 5: 建立 Client 物件，並使用從資料庫中獲得的、可信的資訊
 	client := &Client{
 		hub:      GlobalHub,
 		conn:     conn,
 		send:     make(chan models.Message, 256),
-		UserID:   userID,
-		Username: username,
+		UserID:   user.ID,       // 使用驗證過的 ID
+		Username: user.Username, // 使用從資料庫來的 Username
 	}
 	client.hub.register <- client
 
+	// 啟動讀取和寫入的 goroutine
 	go client.writePump()
 	client.readPump()
 }
