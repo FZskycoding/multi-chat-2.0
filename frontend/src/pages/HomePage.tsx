@@ -77,17 +77,20 @@ function HomePage() {
         setChatRooms([]);
         return;
       }
+
+      // 將聊天室按照"最後更新時間"從新到舊排序
       const sortedRooms = rooms.sort(
         (a, b) =>
           new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       );
-      setChatRooms(sortedRooms);
+      setChatRooms(sortedRooms); // 將排序後的結果存入 state
     } catch (error) {
       console.error("Error fetching user chat rooms:", error);
       setChatRooms([]);
     }
   }, []);
 
+  // 包裝「獲取所有使用者」的 API 呼叫
   const fetchAllUsers = useCallback(async () => {
     if (userSession) {
       const users = await getAllUsers();
@@ -95,6 +98,7 @@ function HomePage() {
     }
   }, [userSession]);
 
+  // 這個 useEffect 負責在使用者資訊 (userSession) 改變時執行
   useEffect(() => {
     if (!userSession) {
       navigate("/auth");
@@ -124,37 +128,63 @@ function HomePage() {
 
     newWs.onmessage = (event: MessageEvent) => {
       const receivedMessage: Message = JSON.parse(event.data);
+
+      if (receivedMessage.type === "force_logout"){
+        notifications.show({
+          title: "登出通知",
+          message:receivedMessage.content || "您的帳號已在另一台裝置登入，您已被登出",
+          color: "orange",
+          autoClose: 5000,
+        });
+        handleLogout();
+        return;
+      }
+
+      // 檢查是否需要更新聊天室狀態
       if (receivedMessage.type === "room_state_update") {
         fetchUserChatRooms();
       }
+
+      // 檢查這則訊息所屬的聊天室，是否已經存在於我目前的列表上
       setChatRooms((prevChatRooms) => {
         const roomExists = prevChatRooms.some(
           (room) => room.id === receivedMessage.roomId
         );
+
+        // 如果聊天室不存在，使用fetchUserChatRooms重新獲取一次聊天室
+        // 同時，暫時先回傳舊的列表，避免畫面閃爍，等待 fetch 完成後畫面會自動更新
         if (!roomExists && receivedMessage.type !== "room_state_update") {
           fetchUserChatRooms();
           return prevChatRooms;
         }
+
+        // 如果聊天室「存在」，我們就要更新它，並把它移到最上面
         const updatedChatRooms = prevChatRooms.map((room) => {
           if (room.id === receivedMessage.roomId) {
             return {
               ...room,
-              name: receivedMessage.roomName,
-              updatedAt: receivedMessage.timestamp,
+              name: receivedMessage.roomName, // 更新房間名稱
+              updatedAt: receivedMessage.timestamp, // 更新「最後活躍時間」，這是排序的依據
             };
           }
           return room;
         });
+
+        // 將所有聊天室（包含剛更新的那間）重新排序
         return updatedChatRooms.sort(
           (a, b) =>
             new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
         );
       });
+
+      // 如果你剛好正在看那個聊天室，也要同步更新聊天室標題
       setSelectedRoom((prevSelectedRoom) =>
         prevSelectedRoom && prevSelectedRoom.id === receivedMessage.roomId
           ? { ...prevSelectedRoom, name: receivedMessage.roomName }
           : prevSelectedRoom
       );
+
+      // 如果收到的是「一般」或「系統」訊息，就把它存到 messages 的 Map 中
       if (
         receivedMessage.type === "normal" ||
         receivedMessage.type === "system"
@@ -174,12 +204,18 @@ function HomePage() {
     };
     ws.current = newWs;
     return () => {
+      // websocket 連線狀態
+      // 0 (CONNECTING): 連線中
+      // 1 (OPEN): 已連線。
+      // 2 (CLOSING): 正在關閉
+      // 3 (CLOSED): 已關閉
       if (newWs && newWs.readyState < 2) {
         newWs.close();
       }
     };
   }, [userSession, navigate, fetchUserChatRooms, handleLogout]);
 
+  // 這個 useEffect 專門用來獲取資料
   useEffect(() => {
     if (userSession) {
       fetchAllUsers();

@@ -207,6 +207,17 @@ func (h *Hub) Run() {
 			// 如果此 user ID 已有連線，先斷開舊的
 			if oldClient, ok := h.clientsByUserID[client.UserID]; ok {
 				log.Printf("User %s already connected, closing old connection.", client.UserID.Hex())
+				forceLogoutMessage := models.Message{
+					Type:    models.MessageTypeForceLogout,
+					Content: "您的帳號已在另一台裝置登入，您已被登出。",
+				}
+				// 嘗試將訊息發送到舊客戶端的 channel
+				select {
+				case oldClient.send <- forceLogoutMessage:
+				default:
+					// 如果舊客戶端的 channel 已滿或關閉，則不執行任何操作
+					log.Printf("Old client %s's channel is full or closed, cannot send force_logout message.", oldClient.UserID.Hex())
+				}
 				close(oldClient.send)
 				delete(h.clients, oldClient)
 			}

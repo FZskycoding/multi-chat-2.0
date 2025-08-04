@@ -13,6 +13,7 @@ const (
 	MessageTypeNormal MessageType = "normal" // 普通消息
 	MessageTypeSystem MessageType = "system" // 系統消息
 	MessageTypeUpdate MessageType = "room_state_update" // 更新消息(需隱藏)
+	MessageTypeForceLogout MessageType = "force_logout"
 )
 
 // Message 代表一個聊天訊息
