@@ -1,27 +1,22 @@
 // src/pages/HomePage.tsx
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import type { ChatRoom, User, Message } from "../types/index";
 import {
   AppShell,
   Burger,
   Group,
-  Button,
   ScrollArea,
   Divider,
   Paper,
   Title,
+  Button,
   Stack,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { notifications } from "@mantine/notifications";
-import { getUserSession, clearUserSession } from "../utils/utils_auth";
-import { getAllUsers } from "../api/api_user";
-import {
-  createChatRoom,
-  getUserChatRooms,
-  leaveChatRoom,
-} from "../api/api_chatroom";
+import { useAuth } from "../hooks/useAuth";
+import { useUsers } from "../hooks/useUsers";
+import { useChat } from "../hooks/useChat";
+import { useWebSocket } from "../hooks/useWebSocket";
+
 import UserList from "../components/lists/UserList";
 import ChatRoomList from "../components/lists/ChatRoomList";
 import ChatMessages from "../components/chat/ChatMessages";
@@ -29,262 +24,65 @@ import MessageInput from "../components/chat/MessageInput";
 import AppHeader from "../components/common/AppHeader";
 import WelcomeMessage from "../components/common/WelcomeMessage";
 import InviteUsersModal from "../components/modals/InviteUsersModal";
+import type { ChatRoom } from "../types";
 
 function HomePage() {
-  const navigate = useNavigate();
-  const [userSession, setUserSession] = useState(getUserSession());
   const [opened, { toggle }] = useDisclosure();
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
-  const [selectedRoom, setSelectedRoom] = useState<ChatRoom | null>(null);
-  const ws = useRef<WebSocket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  const { userSession, handleLogout } = useAuth();
+  const { allUsers, fetchAllUsers } = useUsers(userSession);
+  const {
+    chatRooms,
+    selectedRoom,
+    messages,
+    handleSelectRoom,
+    startChatWithUser,
+    handleLeaveRoom,
+    fetchUserChatRooms,
+    exitChat,
+    updateChatState,
+    setSelectedRoom,
+  } = useChat(userSession);
+
+  const { isConnected, sendMessage } = useWebSocket(
+    userSession,
+    updateChatState, // onMessageReceived
+    handleLogout, // onForceLogout
+    fetchUserChatRooms // onStateUpdate
+  );
+
   const [messageInput, setMessageInput] = useState("");
-  const [messages, setMessages] = useState(new Map<string, Message[]>());
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [
     isInviteModalOpen,
     { open: openInviteModal, close: closeInviteModal },
   ] = useDisclosure(false);
-  const [chatRoomToInvite, setChatRoomToInvite] = useState<ChatRoom | null>(
-    null
-  );
+  const [chatRoomToInvite, setChatRoomToInvite] = useState<ChatRoom | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    // 這個 effect 只會在元件第一次掛載時執行一次
-    const session = getUserSession();
-    // 檢查元件內部的狀態是否和 localStorage 的實際情況一致
-    if (session && JSON.stringify(session) !== JSON.stringify(userSession)) {
-      // 如果不一致，就用 localStorage 的最新資料來更新元件狀態
-      setUserSession(session);
-    }
-  }, [userSession]);
-
-  const handleLogout = useCallback(
-    () => {
-      if (ws.current) {
-        ws.current.close();
-      }
-      clearUserSession();
-      setUserSession(null);
-      navigate("/auth");
-    },
-    // 第二個參數：依賴陣列
-    [navigate]
-  );
-
-  const fetchUserChatRooms = useCallback(async () => {
-    try {
-      const rooms = await getUserChatRooms();
-      if (!rooms) {
-        setChatRooms([]);
-        return;
-      }
-
-      // 將聊天室按照"最後更新時間"從新到舊排序
-      const sortedRooms = rooms.sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-      setChatRooms(sortedRooms); // 將排序後的結果存入 state
-    } catch (error) {
-      console.error("Error fetching user chat rooms:", error);
-      setChatRooms([]);
-    }
-  }, []);
-
-  // 包裝「獲取所有使用者」的 API 呼叫
-  const fetchAllUsers = useCallback(async () => {
-    if (userSession) {
-      const users = await getAllUsers();
-      setAllUsers(users.filter((u: User) => u.id !== userSession.id));
-    }
-  }, [userSession]);
-
-  // 這個 useEffect 負責在使用者資訊 (userSession) 改變時執行
-  useEffect(() => {
-    if (!userSession) {
-      navigate("/auth");
-      return;
-    }
-    if (ws.current && ws.current.readyState < 2) {
-      return;
-    }
-
-    // 檢查 userSession 和 token 是否存在
-    if (!userSession.token) {
-      console.error("WebSocket 連線失敗: 缺少 token。");
-      notifications.show({
-        title: "連線錯誤",
-        message: "無法建立安全連線，請重新登入。",
-        color: "red",
-      });
-      handleLogout(); // 強制登出
-      return;
-    }
-    // 使用 token 建立安全的 WebSocket URL
-    const websocketUrl = `ws://localhost:8080/ws?token=${userSession.token}`;
-    const newWs = new WebSocket(websocketUrl);
-    newWs.onopen = () => setIsConnected(true);
-    newWs.onclose = () => setIsConnected(false);
-    newWs.onerror = () => setIsConnected(false);
-
-    newWs.onmessage = (event: MessageEvent) => {
-      const receivedMessage: Message = JSON.parse(event.data);
-
-      if (receivedMessage.type === "force_logout") {
-        notifications.show({
-          title: "登出通知",
-          message:
-            receivedMessage.content || "您的帳號已在另一台裝置登入，您已被登出",
-          color: "orange",
-          autoClose: 5000,
-        });
-        handleLogout();
-        return;
-      }
-
-      // 檢查是否需要更新聊天室狀態
-      if (receivedMessage.type === "room_state_update") {
-        fetchUserChatRooms();
-      }
-
-      // 檢查這則訊息所屬的聊天室，是否已經存在於我目前的列表上
-      setChatRooms((prevChatRooms) => {
-        const roomExists = prevChatRooms.some(
-          (room) => room.id === receivedMessage.roomId
-        );
-
-        // 如果聊天室不存在，使用fetchUserChatRooms重新獲取一次聊天室
-        // 同時，暫時先回傳舊的列表，避免畫面閃爍，等待 fetch 完成後畫面會自動更新
-        if (!roomExists && receivedMessage.type !== "room_state_update") {
-          fetchUserChatRooms();
-          return prevChatRooms;
-        }
-
-        // 如果聊天室「存在」，我們就要更新它，並把它移到最上面
-        const updatedChatRooms = prevChatRooms.map((room) => {
-          if (room.id === receivedMessage.roomId) {
-            return {
-              ...room,
-              name: receivedMessage.roomName, // 更新房間名稱
-              updatedAt: receivedMessage.timestamp, // 更新「最後活躍時間」，這是排序的依據
-            };
-          }
-          return room;
-        });
-
-        // 將所有聊天室（包含剛更新的那間）重新排序
-        return updatedChatRooms.sort(
-          (a, b) =>
-            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-        );
-      });
-
-      // 如果你剛好正在看那個聊天室，也要同步更新聊天室標題
-      setSelectedRoom((prevSelectedRoom) =>
-        prevSelectedRoom && prevSelectedRoom.id === receivedMessage.roomId
-          ? { ...prevSelectedRoom, name: receivedMessage.roomName }
-          : prevSelectedRoom
-      );
-
-      // 如果收到的是「一般」或「系統」訊息，就把它存到 messages 的 Map 中
-      if (
-        receivedMessage.type === "normal" ||
-        receivedMessage.type === "system"
-      ) {
-        setMessages((prevMessagesMap) => {
-          const newMap = new Map(prevMessagesMap);
-          const roomMessages = newMap.get(receivedMessage.roomId) || [];
-          if (!roomMessages.some((msg) => msg.id === receivedMessage.id)) {
-            newMap.set(receivedMessage.roomId, [
-              ...roomMessages,
-              receivedMessage,
-            ]);
-          }
-          return newMap;
-        });
-      }
-    };
-    ws.current = newWs;
-    return () => {
-      // websocket 連線狀態
-      // 0 (CONNECTING): 連線中
-      // 1 (OPEN): 已連線。
-      // 2 (CLOSING): 正在關閉
-      // 3 (CLOSED): 已關閉
-      if (newWs && newWs.readyState < 2) {
-        newWs.close();
-      }
-    };
-  }, [userSession, navigate, fetchUserChatRooms, handleLogout]);
-
-  // 這個 useEffect 專門用來獲取資料
   useEffect(() => {
     if (userSession) {
-      fetchAllUsers();
       fetchUserChatRooms();
+      fetchAllUsers();
     }
-  }, [userSession, fetchAllUsers, fetchUserChatRooms, handleLogout]);
+  }, [userSession, fetchUserChatRooms, fetchAllUsers]);
 
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const fetchChatHistory = useCallback(
-    async (roomId: string) => {
-      if (!userSession) return [];
-      try {
-        const response = await fetch(
-          `http://localhost:8080/chat-history?roomId=${roomId}`,
-          {
-            headers: { Authorization: `Bearer ${userSession.token}` },
-          }
-        );
-        if (!response.ok) throw new Error("Failed to fetch chat history");
-        return response.json().then((data) => data.messages || []);
-      } catch (error) {
-        console.error(`Error fetching chat history for room ${roomId}:`, error);
-        return [];
-      }
-    },
-    [userSession]
-  );
-
-  const handleSelectRoom = useCallback(
-    async (room: ChatRoom) => {
-      setSelectedRoom(room);
-      const history = await fetchChatHistory(room.id);
-      setMessages((prev) => new Map(prev).set(room.id, history));
-    },
-    [fetchChatHistory]
-  );
-
-  const startChatWithUser = useCallback(
-    async (targetUser: User) => {
-      if (!userSession) return;
-      try {
-        const room = await createChatRoom([userSession.id, targetUser.id]);
-        if (!room) return;
-        fetchUserChatRooms();
-        setSelectedRoom(room);
-        const history = await fetchChatHistory(room.id);
-        setMessages((prev) => new Map(prev).set(room.id, history));
-      } catch (error) {
-        console.error("Error starting chat:", error);
-      }
-    },
-    [userSession, fetchUserChatRooms, fetchChatHistory]
-  );
+  const handleSendMessage = useCallback(() => {
+    if (!selectedRoom || messageInput.trim() === "") return;
+    const messageToSend = {
+      roomId: selectedRoom.id,
+      content: messageInput,
+      type: "normal",
+    } as const;
+    sendMessage(messageToSend);
+    setMessageInput("");
+  }, [selectedRoom, messageInput, sendMessage]);
 
   const handleInviteClick = useCallback(
-    (room: ChatRoom) => {
+    (room:ChatRoom) => {
       setChatRoomToInvite(room);
       openInviteModal();
     },
@@ -292,64 +90,17 @@ function HomePage() {
   );
 
   const handleInviteSuccess = useCallback(
-    (updatedChatRoom: ChatRoom) => {
+    (updatedChatRoom:ChatRoom) => {
       fetchUserChatRooms();
       if (selectedRoom?.id === updatedChatRoom.id) {
         setSelectedRoom(updatedChatRoom);
       }
     },
-    [selectedRoom, fetchUserChatRooms]
+    [selectedRoom, fetchUserChatRooms, setSelectedRoom]
   );
-
-  // 【最終修正】處理退出聊天室的邏輯
-  const handleLeaveRoom = useCallback(
-    async (room: ChatRoom) => {
-      const success = await leaveChatRoom(room.id);
-      if (success) {
-        // API 呼叫成功後，立即從前端 state 中移除該聊天室
-        setChatRooms((prevRooms) => prevRooms.filter((r) => r.id !== room.id));
-
-        // 如果退出的聊天室是當前選中的，則清空選中狀態
-        if (selectedRoom?.id === room.id) {
-          setSelectedRoom(null);
-        }
-
-        notifications.show({
-          title: "已退出",
-          message: `您已成功退出聊天室：${room.name}`,
-          color: "blue",
-        });
-      }
-    },
-    [selectedRoom] // 依賴項保持不變
-  );
-
-  const exitChat = () => {
-    setSelectedRoom(null);
-  };
-
-  const handleSendMessage = useCallback(() => {
-    if (!isConnected || !ws.current) {
-      notifications.show({
-        title: "錯誤",
-        message: "WebSocket 未連線。",
-        color: "red",
-      });
-      return;
-    }
-    if (!selectedRoom || messageInput.trim() === "") return;
-    const messageToSend: Partial<Message> = {
-      roomId: selectedRoom.id,
-      content: messageInput,
-      type: "normal",
-    };
-    ws.current.send(JSON.stringify(messageToSend));
-    setMessageInput("");
-  }, [isConnected, selectedRoom, messageInput]);
 
   if (!userSession) {
-    console.log("已失去userSession")
-    return null;
+    return null; // 或者顯示一個載入中的畫面
   }
 
   return (

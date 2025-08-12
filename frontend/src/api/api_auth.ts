@@ -1,7 +1,6 @@
 // src/api/auth.ts
 import { notifications } from "@mantine/notifications";
-
-const API_BASE_URL = "http://localhost:8080";
+import { API_BASE_URL } from "../config";
 
 interface RegisterPayload {
   email: string;
