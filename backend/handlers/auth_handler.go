@@ -2,15 +2,21 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"time"
 
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+
+	"go-chat/backend/config"
 	"go-chat/backend/database"
 	"go-chat/backend/models"
-	"go-chat/backend/utils" 
-	"go-chat/backend/config"
+	"go-chat/backend/utils"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -146,7 +152,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := config.LoadConfig() // 獲取 JWT Secret
+	cfg := config.LoadConfig()                                             // 獲取 JWT Secret
 	token, err := utils.GenerateJWT(user.ID, user.Username, cfg.JWTSecret) // 調用 utils 中的 GenerateJWT 函數
 	if err != nil {
 		log.Printf("Error generating JWT token for user %s: %v", user.ID.Hex(), err)
@@ -204,4 +210,129 @@ func GetAllUsers(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error encoding public users: %v", err)
 		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
 	}
+}
+
+var googleOAuthConfig *oauth2.Config
+var oauthStateString string
+
+// 初始化 Google OAuth 設定
+func InitializeOAuthGoogle() {
+	cfg := config.LoadConfig()
+	googleOAuthConfig = &oauth2.Config{
+		RedirectURL:  cfg.GoogleRedirectURL,
+		ClientID:     cfg.GoogleClientID,
+		ClientSecret: cfg.GoogleClientSecret,
+		Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
+		Endpoint:     google.Endpoint,
+	}
+}
+
+// HandleGoogleLogin 處理導向 Google 登入頁面的請求
+func HandleGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	// 產生一個隨機 state 字串，用於 CSRF 保護
+	b := make([]byte, 16)
+	rand.Read(b)
+	oauthStateString = base64.URLEncoding.EncodeToString(b)
+
+	// 將 state 存入 cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:    "oauthstate",
+		Value:   oauthStateString,
+		Expires: time.Now().Add(10 * time.Minute),
+	})
+
+	url := googleOAuthConfig.AuthCodeURL(oauthStateString)
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+}
+
+// HandleGoogleCallback 處理 Google 重新導向回來的請求
+func HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
+	// 檢查 state 是否相符
+	oauthState, _ := r.Cookie("oauthstate")
+	if r.FormValue("state") != oauthState.Value {
+		log.Println("invalid oauth google state")
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	// 用授權碼交換 token
+	token, err := googleOAuthConfig.Exchange(context.Background(), r.FormValue("code"))
+	if err != nil {
+		log.Printf("code exchange wrong: %s\n", err.Error())
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	// 用 token 獲取使用者資訊
+	response, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + token.AccessToken)
+	if err != nil {
+		log.Printf("failed getting user info: %s\n", err.Error())
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+	defer response.Body.Close()
+
+	contents, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Printf("failed read user info: %s\n", err.Error())
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	var googleUser struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+		Name  string `json:"name"`
+	}
+	json.Unmarshal(contents, &googleUser)
+
+	usersCollection := database.GetCollection("users")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 檢查使用者是否存在
+	var user models.User
+	err = usersCollection.FindOne(ctx, bson.M{"googleId": googleUser.ID}).Decode(&user)
+
+	// 如果使用者不存在，就建立新使用者
+	if err == mongo.ErrNoDocuments {
+		newUser := models.User{
+			GoogleID: googleUser.ID,
+			Email:    googleUser.Email,
+			Username: googleUser.Name, // 直接使用 Google 名稱作為使用者名稱
+		}
+		res, err := usersCollection.InsertOne(ctx, newUser)
+		if err != nil {
+			log.Printf("Error inserting new Google user: %v", err)
+			http.Redirect(w, r, "/auth?error=registration_failed", http.StatusTemporaryRedirect)
+			return
+		}
+		user.ID = res.InsertedID.(primitive.ObjectID)
+		user.Username = newUser.Username
+		user.Email = newUser.Email
+	} else if err != nil {
+		log.Printf("Error finding user by Google ID: %v", err)
+		http.Redirect(w, r, "/auth?error=db_error", http.StatusTemporaryRedirect)
+		return
+	}
+
+	// 產生 JWT
+	cfg := config.LoadConfig()
+	jwtToken, err := utils.GenerateJWT(user.ID, user.Username, cfg.JWTSecret)
+	if err != nil {
+		log.Printf("Error generating JWT for Google user: %v", err)
+		http.Redirect(w, r, "/auth?error=token_generation_failed", http.StatusTemporaryRedirect)
+		return
+	}
+
+	// 將 JWT 存入 cookie 並導回前端首頁
+	http.SetCookie(w, &http.Cookie{
+		Name:     "token",
+		Value:    jwtToken,
+		Path:     "/",
+		Expires:  time.Now().Add(24 * time.Hour),
+		HttpOnly: true, // 建議設為 true 增加安全性
+	})
+
+	http.Redirect(w, r, "http://localhost:5173/home", http.StatusTemporaryRedirect)
 }

@@ -36,7 +36,8 @@ type User struct {
 	ID       primitive.ObjectID `bson:"_id,omitempty" json:"id,omitempty"` // MongoDB 的唯一 ID
 	Email    string             `bson:"email" json:"email" unique:"true"`  // 使用者 Email
 	Username string             `bson:"username" json:"username"`          // 使用者名稱
-	Password string             `bson:"password" json:"-"`                 // 儲存哈希後的密碼，JSON 輸出時忽略
+	Password string             `bson:"password,omitempty" json:"-"`       // 儲存哈希後的密碼，設為可選
+	GoogleID string             `bson:"googleId,omitempty" json:"-"`       // 儲存哈希後的密碼，JSON 輸出時忽略
 }
 
 // PublicUser 結構體用於返回給前端，不包含敏感資訊

@@ -68,7 +68,7 @@ func GenerateJWT(userID primitive.ObjectID, username string, secret string) (str
 		"userId":   userID.Hex(), // 將 ObjectID 轉換為 Hex 字串儲存
 		"username": username,
 		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Token 24 小時後過期
-		"iat":      time.Now().Unix(),
+		"iat":      time.Now().Unix(), // 獲取當下的時間
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

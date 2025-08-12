@@ -26,6 +26,9 @@ func main() {
 	database.ConnectMongoDB(cfg.MongoDBURI, cfg.DBName)
 	defer database.DisconnectMongoDB()
 
+	// 初始化 Google OAuth 設定
+	handlers.InitializeOAuthGoogle()
+
 	// 啟動 WebSocket Hub
 	go websocket.GlobalHub.Run()
 
@@ -39,6 +42,8 @@ func main() {
 	// 不需要 JWT 的路由
 	router.HandleFunc("/register", handlers.RegisterUser).Methods("POST")
 	router.HandleFunc("/login", handlers.LoginUser).Methods("POST")
+	router.HandleFunc("/auth/google/login", handlers.HandleGoogleLogin).Methods("GET")
+	router.HandleFunc("/auth/google/callback", handlers.HandleGoogleCallback).Methods("GET")
 
 	// --- 需要 JWT 驗證的路由 ---
 	// 獲取所有使用者 API 路由 (需要登入才能看)

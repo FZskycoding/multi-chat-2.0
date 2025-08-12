@@ -9,10 +9,13 @@ import (
 
 // Config 結構體用於儲存應用程式的配置
 type Config struct {
-	MongoDBURI string
-	DBName     string
-	Port       string
-	JWTSecret  string
+	MongoDBURI         string
+	DBName             string
+	Port               string
+	JWTSecret          string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
 }
 
 // LoadConfig 載入配置，優先從環境變數讀取，其次從 .env 檔案讀取
@@ -24,10 +27,13 @@ func LoadConfig() *Config {
 	}
 
 	cfg := &Config{
-		MongoDBURI: getEnv("MONGODB_URI", "mongodb://localhost:27017"),
-		DBName:     getEnv("DB_NAME", "chat_app_db"),
-		Port:       getEnv("PORT", "8080"),
-		JWTSecret:  getEnv("JWT_SECRET", "your_super_secret_jwt_key_please_change_this_in_production"),
+		MongoDBURI:         getEnv("MONGODB_URI", "mongodb://localhost:27017"),
+		DBName:             getEnv("DB_NAME", "chat_app_db"),
+		Port:               getEnv("PORT", "8080"),
+		JWTSecret:          getEnv("JWT_SECRET", "your_super_secret_jwt_key_please_change_this_in_production"),
+		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", ""),
 	}
 	return cfg
 }
