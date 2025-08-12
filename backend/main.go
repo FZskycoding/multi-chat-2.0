@@ -50,7 +50,7 @@ func main() {
 	router.Handle("/all-users", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetAllUsers))).Methods("GET")
 
 	// 聊天室相關路由 (需要登入才能操作)
-	router.Handle("/creat-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
+	router.Handle("/create-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
 	router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms))).Methods("GET")
 	router.Handle("/chatrooms/{id}/update", middleware.JWTMiddleware(http.HandlerFunc(handlers.UpdateChatRoom))).Methods("PUT")
 	router.Handle("/chatrooms/{id}/leave", middleware.JWTMiddleware(http.HandlerFunc(handlers.LeaveChatRoom))).Methods("POST")

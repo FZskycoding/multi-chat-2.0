@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -334,5 +336,11 @@ func HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, // 建議設為 true 增加安全性
 	})
 
-	http.Redirect(w, r, "http://localhost:5173/home", http.StatusTemporaryRedirect)
+	redirectURL := fmt.Sprintf("http://localhost:5173/home?token=%s&id=%s&username=%s",
+		jwtToken,
+		user.ID.Hex(),
+		url.QueryEscape(user.Username), // 對 username 進行 URL 編碼
+	)
+
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }

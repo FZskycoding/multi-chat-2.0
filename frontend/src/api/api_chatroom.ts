@@ -170,7 +170,7 @@ export async function createChatRoom( //
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/creat-chatrooms`, {
+    const response = await fetch(`${API_BASE_URL}/create-chatrooms`, {
       //
       method: "POST", //
       headers: {

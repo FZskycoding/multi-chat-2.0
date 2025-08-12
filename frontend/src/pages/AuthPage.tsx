@@ -8,6 +8,7 @@ import {
   Button,
   Title,
   Anchor,
+  Divider,
   Group,
   Stack,
   Flex,
@@ -74,6 +75,11 @@ function AuthPage() {
       console.error("登入處理失敗:", error);
       // 錯誤訊息已由 api/auth.ts 中的 notifications 處理
     }
+  };
+
+  const handleGoogleLogin = () => {
+    // 直接導向後端處理，後端會再導向 Google
+    window.location.href = "http://localhost:8080/auth/google/login";
   };
 
   return (
@@ -168,6 +174,15 @@ function AuthPage() {
                 radius="md"
               />
             </Stack>
+            <Divider label="或" labelPosition="center" my="lg" />
+            <Button
+              fullWidth
+              variant="outline"
+              color="gray"
+              onClick={handleGoogleLogin}
+            >
+              使用Google登入
+            </Button>
 
             <Group justify="space-between" mt="xl">
               <Anchor

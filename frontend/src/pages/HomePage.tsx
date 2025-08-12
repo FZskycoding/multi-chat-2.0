@@ -6,7 +6,6 @@ import {
   AppShell,
   Burger,
   Group,
-  Text,
   Button,
   ScrollArea,
   Divider,
@@ -56,6 +55,16 @@ function HomePage() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+  useEffect(() => {
+    // 這個 effect 只會在元件第一次掛載時執行一次
+    const session = getUserSession();
+    // 檢查元件內部的狀態是否和 localStorage 的實際情況一致
+    if (session && JSON.stringify(session) !== JSON.stringify(userSession)) {
+      // 如果不一致，就用 localStorage 的最新資料來更新元件狀態
+      setUserSession(session);
+    }
+  }, [userSession]);
 
   const handleLogout = useCallback(
     () => {
@@ -129,10 +138,11 @@ function HomePage() {
     newWs.onmessage = (event: MessageEvent) => {
       const receivedMessage: Message = JSON.parse(event.data);
 
-      if (receivedMessage.type === "force_logout"){
+      if (receivedMessage.type === "force_logout") {
         notifications.show({
           title: "登出通知",
-          message:receivedMessage.content || "您的帳號已在另一台裝置登入，您已被登出",
+          message:
+            receivedMessage.content || "您的帳號已在另一台裝置登入，您已被登出",
           color: "orange",
           autoClose: 5000,
         });
@@ -337,7 +347,10 @@ function HomePage() {
     setMessageInput("");
   }, [isConnected, selectedRoom, messageInput]);
 
-  if (!userSession) return <Text>重定向中...</Text>;
+  if (!userSession) {
+    console.log("已失去userSession")
+    return null;
+  }
 
   return (
     <AppShell
