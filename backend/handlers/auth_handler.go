@@ -19,6 +19,7 @@ import (
 	"go-chat/backend/database"
 	"go-chat/backend/models"
 	"go-chat/backend/utils"
+	"go-chat/backend/store"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -26,6 +27,19 @@ import (
 	"golang.org/x/crypto/bcrypt" // 用於密碼哈希
 )
 
+// AuthHandler 包含處理認證請求的所有依賴
+type AuthHandler struct {
+	UserStore store.UserStorer // <<<--- 依賴於介面，而不是具體實作
+	Cfg       *config.Config
+}
+
+// NewAuthHandler 是一個工廠函式，用於建立新的 AuthHandler
+func NewAuthHandler(userStore store.UserStorer, cfg *config.Config) *AuthHandler {
+	return &AuthHandler{
+		UserStore: userStore,
+		Cfg:       cfg,
+	}
+}
 // sendJSONError 統一發送 JSON 格式錯誤響應
 func sendJSONError(w http.ResponseWriter, message string, statusCode int) {
 	var errorResponse models.ErrorResponse
@@ -38,49 +52,37 @@ func sendJSONError(w http.ResponseWriter, message string, statusCode int) {
 }
 
 // RegisterUser 處理使用者註冊請求
-func RegisterUser(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	var registerReq models.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&registerReq); err != nil {
-		log.Printf("JSON decode error: %v", err)
 		sendJSONError(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
 
-	// 基本的輸入驗證
 	if registerReq.Email == "" || registerReq.Username == "" || registerReq.Password == "" {
 		sendJSONError(w, "Email, username, and password are required", http.StatusBadRequest)
 		return
 	}
 
-	usersCollection := database.GetCollection("users")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// 檢查 Email 是否已存在
-	count, err := usersCollection.CountDocuments(ctx, bson.M{"email": registerReq.Email})
+	// --- 使用 UserStore 介面進行操作 ---
+	emailExists, usernameExists, err := h.UserStore.CheckUserExists(ctx, registerReq.Email, registerReq.Username)
 	if err != nil {
-		log.Printf("Error checking existing email: %v", err)
+		log.Printf("Error checking existing user: %v", err)
 		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	if count > 0 {
+	if emailExists {
 		sendJSONError(w, "Email already registered", http.StatusConflict)
 		return
 	}
-
-	// 檢查 Username 是否已存在
-	count, err = usersCollection.CountDocuments(ctx, bson.M{"username": registerReq.Username})
-	if err != nil {
-		log.Printf("Error checking existing username: %v", err)
-		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	if count > 0 {
+	if usernameExists {
 		sendJSONError(w, "Username already taken", http.StatusConflict)
 		return
 	}
 
-	// 哈希密碼
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(registerReq.Password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("Error hashing password: %v", err)
@@ -88,57 +90,53 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 創建新使用者
 	user := models.User{
 		Email:    registerReq.Email,
 		Username: registerReq.Username,
 		Password: string(hashedPassword),
 	}
 
-	// 插入新使用者到資料庫
-	result, err := usersCollection.InsertOne(ctx, user)
+	// --- 使用 UserStore 介面進行操作 ---
+	insertedID, err := h.UserStore.CreateUser(ctx, user)
 	if err != nil {
 		log.Printf("Error inserting user: %v", err)
 		sendJSONError(w, "Failed to register user", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("User registered successfully: %v", result.InsertedID)
+	log.Printf("User registered successfully: %v", insertedID.Hex())
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated) // 201 Created
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(models.RegisterResponse{
 		Message: "User registered successfully",
-		ID:      result.InsertedID.(primitive.ObjectID).Hex(),
+		ID:      insertedID.Hex(),
 	})
 }
 
 // LoginUser 處理使用者登入請求
-func LoginUser(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	var credentials struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
-		log.Printf("JSON decode error: %v", err)
 		sendJSONError(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
 
-	// 基本的輸入驗證
 	if credentials.Email == "" || credentials.Password == "" {
 		sendJSONError(w, "Email and password are required", http.StatusBadRequest)
 		return
 	}
 
-	usersCollection := database.GetCollection("users")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// 透過 Email 尋找使用者
-	var user models.User
-	err := usersCollection.FindOne(ctx, bson.M{"email": credentials.Email}).Decode(&user)
+	// --- 使用 UserStore 介面進行操作 ---
+	user, err := h.UserStore.FindUserByEmail(ctx, credentials.Email)
 	if err != nil {
+		// 根據錯誤類型回傳不同訊息
 		if err == mongo.ErrNoDocuments {
 			sendJSONError(w, "Invalid credentials", http.StatusUnauthorized)
 		} else {
@@ -148,28 +146,24 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 比較哈希後的密碼
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(credentials.Password)); err != nil {
 		sendJSONError(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
-	cfg := config.LoadConfig()                                             // 獲取 JWT Secret
-	token, err := utils.GenerateJWT(user.ID, user.Username, cfg.JWTSecret) // 調用 utils 中的 GenerateJWT 函數
+	token, err := utils.GenerateJWT(user.ID, user.Username, h.Cfg.JWTSecret)
 	if err != nil {
 		log.Printf("Error generating JWT token for user %s: %v", user.ID.Hex(), err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	// 登入成功
 	log.Printf("User logged in successfully: %s", user.Email)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK) // 200 OK
-	// 回傳使用者 ID 和 Username 給前端
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(models.LoginResponse{
 		Message:  "Login successful",
-		ID:       user.ID.Hex(), // 將 ObjectID 轉換為 Hex 字串
+		ID:       user.ID.Hex(),
 		Username: user.Username,
 		Token:    token,
 	})

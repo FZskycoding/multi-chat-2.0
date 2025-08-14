@@ -17,7 +17,8 @@ import (
 	"go-chat/backend/websocket" // 引入 websocket 套件
 
 	"github.com/gorilla/mux"
-	"github.com/rs/cors" // 引入 CORS 庫
+	"github.com/rs/cors" 
+	"go-chat/backend/store"
 )
 
 func main() {
@@ -34,14 +35,19 @@ func main() {
 
 	router := mux.NewRouter()
 
+	// 建立 UserStorer 的實例
+	userStore := store.NewMongoUserStore()
+	// 建立 AuthHandler 的實例，並注入依賴
+	authHandler := handlers.NewAuthHandler(userStore, cfg)
+
 	// 健康檢查路由 (通常不需要 JWT)
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Backend is running!")
 	}).Methods("GET")
 
 	// 不需要 JWT 的路由
-	router.HandleFunc("/register", handlers.RegisterUser).Methods("POST")
-	router.HandleFunc("/login", handlers.LoginUser).Methods("POST")
+	router.HandleFunc("/register", authHandler.RegisterUser).Methods("POST")
+	router.HandleFunc("/login", authHandler.LoginUser).Methods("POST")
 	router.HandleFunc("/auth/google/login", handlers.HandleGoogleLogin).Methods("GET")
 	router.HandleFunc("/auth/google/callback", handlers.HandleGoogleCallback).Methods("GET")
 
