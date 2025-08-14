@@ -24,7 +24,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"golang.org/x/crypto/bcrypt" // 用於密碼哈希
+	"golang.org/x/crypto/bcrypt" 
 )
 
 // AuthHandler 包含處理認證請求的所有依賴
