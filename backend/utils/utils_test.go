@@ -1,4 +1,3 @@
-// backend/utils/utils_test.go
 package utils
 
 import (
@@ -6,7 +5,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/stretchr/testify/assert" // 引入 testify/assert
+	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -51,4 +50,49 @@ func TestGenerateJWT(t *testing.T) {
 	exp, ok := claims["exp"].(float64)
 	assert.True(t, ok, "exp claim 格式錯誤")
 	assert.Greater(t, int64(exp), time.Now().Unix(), "過期時間應該在未來")
+}
+
+func TestGetUserIDFromToken(t *testing.T) {
+	// 準備共用的測試資料
+	userID := primitive.NewObjectID()
+	username := "testuser"
+	secret := "a-very-secret-key"
+
+	// --- 測試情境 1: 成功的案例 ---
+	t.Run("成功案例 - 有效的 Token", func(t *testing.T) {
+		// 產生一個有效的 token
+		validToken, err := GenerateJWT(userID, username, secret)
+		assert.NoError(t, err)
+
+		// 執行要測試的函式
+		parsedUserID, err := GetUserIDFromToken(validToken, secret)
+
+		// 斷言結果
+		assert.NoError(t, err, "解析有效的 token 不應該返回錯誤")
+		assert.Equal(t, userID, parsedUserID, "解析出的 userID 應該與原始的 userID 相同")
+	})
+
+	// --- 測試情境 2: 失敗的案例 (無效簽名) ---
+	t.Run("失敗案例 - 無效的簽名", func(t *testing.T) {
+		// 產生一個有效的 token
+		validToken, err := GenerateJWT(userID, username, secret)
+		assert.NoError(t, err)
+
+		// 嘗試用錯誤的 secret 去解析
+		_, err = GetUserIDFromToken(validToken, "wrong-secret")
+
+		// 斷言結果
+		assert.Error(t, err, "使用錯誤的 secret 解析應該要返回錯誤")
+		// 我們可以更精確地檢查錯誤類型或訊息
+		assert.Contains(t, err.Error(), "signature is invalid", "錯誤訊息應該包含 'signature is invalid'")
+	})
+
+	// --- 測試情境 3: 失敗的案例 (格式錯誤) ---
+	t.Run("失敗案例 - 格式錯誤的 Token", func(t *testing.T) {
+		// 傳入一個亂寫的字串
+		_, err := GetUserIDFromToken("this-is-not-a-jwt-token", secret)
+
+		// 斷言結果
+		assert.Error(t, err, "解析格式錯誤的 token 應該要返回錯誤")
+	})
 }
