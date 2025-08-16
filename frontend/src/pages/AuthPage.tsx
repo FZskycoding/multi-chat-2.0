@@ -63,11 +63,10 @@ function AuthPage() {
   const handleLogin = async (values: typeof loginForm.values) => {
     try {
       const response = await login(values);
-      if (response.id && response.username && response.token) {
+      if (response.id && response.username) {
         saveUserSession({
           id: response.id,
           username: response.username,
-          token: response.token,
         });
         navigate("/home"); // 登入成功後導航到首頁
       }

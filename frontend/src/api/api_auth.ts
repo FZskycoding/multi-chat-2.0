@@ -30,6 +30,7 @@ export async function register(
       headers: {
         "Content-Type": "application/json",
       },
+      credentials: "include",
       body: JSON.stringify(payload),
     });
 
@@ -75,6 +76,7 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
       headers: {
         "Content-Type": "application/json",
       },
+      credentials: "include",
       body: JSON.stringify(payload),
     });
 
@@ -108,5 +110,22 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
       });
     }
     throw error; 
+  }
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/logout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include", // <-- 確保瀏覽器發送 cookie
+    });
+    // 登出操作不需要處理回傳的 data，只要請求成功即可
+  } catch (error) {
+    // 即使後端登出失敗（例如網路問題），我們仍然希望前端繼續執行登出流程
+    // 所以這裡只記錄錯誤，不拋出錯誤
+    console.error("Logout API call failed:", error);
   }
 }

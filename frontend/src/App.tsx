@@ -4,6 +4,7 @@ import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import AuthPage from "./pages/AuthPage";
 import HomePage from "./pages/HomePage";
 import { isAuthenticated, saveUserSession } from "./utils/utils_auth";
+import Cookies from "js-cookie"; 
 
 function App() {
   const navigate = useNavigate();
@@ -11,16 +12,29 @@ function App() {
 
   // 檢查登入狀態並導航
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const token = params.get("token");
-    const id = params.get("id");
-    const username = params.get("username");
-
-    if (token && id && username) {
-      saveUserSession({ id, username, token });
-      // 使用 replace: true 來替換歷史紀錄，避免使用者按上一頁回到帶有 token 的 URL
-      navigate("/home", { replace: true });
-      return; // 提早結束，避免執行後續邏輯
+    // const params = new URLSearchParams(location.search);
+    // const token = params.get("token");
+    // const id = params.get("id");
+    // const username = params.get("username");
+    const userInfoCookie = Cookies.get("user_info");
+    if (userInfoCookie) {
+      try {
+        const decodedCookie = decodeURIComponent(userInfoCookie)
+        const userInfo = JSON.parse(decodedCookie);
+        const { id, username } = userInfo;
+        if (id && username) {
+          // 如果 cookie 存在且內容有效，就儲存 session
+          saveUserSession({ id, username: decodeURIComponent(username) }); // 對 username 再次解碼
+          // 刪除 user_info cookie，因為它的任務已經完成
+          Cookies.remove("user_info");
+          // 清理 URL 並導航，這一步保持不變
+          navigate("/home", { replace: true });
+          return;
+        }
+      } catch (e) {
+        console.error("Failed to parse user_info cookie", e);
+        Cookies.remove("user_info"); // 如果解析失敗，也刪除壞掉的 cookie
+      }
     }
     // --- 處理所有其他的路由情況 ---
     const isAuth = isAuthenticated();

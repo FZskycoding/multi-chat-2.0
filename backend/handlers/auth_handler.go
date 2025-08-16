@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -343,9 +342,19 @@ func HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 
+	userInfo := map[string]string{
+		"id": user.ID.Hex(),
+		"username": user.Username,
+	}
+
+	userInfoBytes, err := json.Marshal(userInfo)
+	if err!= nil{
+		log.Printf("Error marshalling user_info for cookie: %v", err)
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name: "user_info",
-		Value: fmt.Sprintf(`{"id":"%s","username":"%s"}`, user.ID.Hex(), url.QueryEscape(user.Username)),
+		Value: url.QueryEscape(string(userInfoBytes)),
 		Path: "/",
 		Expires: time.Now().Add(time.Hour * 24),
 	})

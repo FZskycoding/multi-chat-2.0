@@ -14,12 +14,12 @@ export const useWebSocket = (
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    if (!userSession?.token) {
+    if (!userSession) {
       if (ws.current) ws.current.close();
       return;
     }
 
-    const websocketUrl = `${WEBSOCKET_URL}?token=${userSession.token}`;
+    const websocketUrl = WEBSOCKET_URL;
     const newWs = new WebSocket(websocketUrl);
 
     newWs.onopen = () => setIsConnected(true);
@@ -66,7 +66,7 @@ export const useWebSocket = (
           color: "red",
         });
         return;
-      }
+      } 
       ws.current.send(JSON.stringify(messageToSend));
     },
     [isConnected]

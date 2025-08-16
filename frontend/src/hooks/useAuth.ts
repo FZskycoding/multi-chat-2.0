@@ -2,6 +2,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getUserSession, clearUserSession } from "../utils/utils_auth";
+import { logout } from "../api/api_auth";
 
 export const useAuth = () => {
   const navigate = useNavigate();
@@ -12,8 +13,8 @@ export const useAuth = () => {
     setUserSession(getUserSession());
   }, [location]);
 
-  const handleLogout = useCallback(() => {
-    // WebSocket 的關閉邏輯應該由 useWebSocket Hook 自己處理
+  const handleLogout = useCallback(async () => {
+    await logout();
 
     clearUserSession();
     setUserSession(null);
@@ -22,3 +23,5 @@ export const useAuth = () => {
 
   return { userSession, handleLogout };
 };
+
+

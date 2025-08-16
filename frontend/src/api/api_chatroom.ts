@@ -1,6 +1,5 @@
 // frontend/src/api/chatroom.ts
 import { notifications } from "@mantine/notifications";
-import { getUserSession } from "../utils/utils_auth"; // 確保導入正確的路徑
 import type { ChatRoom } from "../types/index";
 const API_BASE_URL = "http://localhost:8080";
 
@@ -9,23 +8,23 @@ const API_BASE_URL = "http://localhost:8080";
  * @returns {Promise<ChatRoom[]>} 聊天室列表
  */
 export async function getUserChatRooms(): Promise<ChatRoom[]> {
-  const userSession = getUserSession();
-  if (!userSession || !userSession.token) {
-    notifications.show({
-      title: "錯誤",
-      message: "未登入或缺少認證資訊，無法獲取聊天室列表。",
-      color: "red",
-    });
-    return [];
-  }
+  // const userSession = getUserSession();
+  // if (!userSession || !userSession.token) {
+  //   notifications.show({
+  //     title: "錯誤",
+  //     message: "未登入或缺少認證資訊，無法獲取聊天室列表。",
+  //     color: "red",
+  //   });
+  //   return [];
+  // }
 
   try {
     const response = await fetch(`${API_BASE_URL}/user-chatrooms`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${userSession.token}`,
       },
+      credentials: "include",
     });
 
     // 當伺服器連線失敗時
@@ -63,23 +62,23 @@ export async function updateChatRoom(
   roomId: string,
   participantIds: string[]
 ): Promise<ChatRoom | null> {
-  const userSession = getUserSession();
-  if (!userSession || !userSession.token) {
-    notifications.show({
-      title: "錯誤",
-      message: "未登入或缺少認證資訊，無法更新聊天室。",
-      color: "red",
-    });
-    return null;
-  }
+  // const userSession = getUserSession();
+  // if (!userSession || !userSession.token) {
+  //   notifications.show({
+  //     title: "錯誤",
+  //     message: "未登入或缺少認證資訊，無法更新聊天室。",
+  //     color: "red",
+  //   });
+  //   return null;
+  // }
 
   try {
     const response = await fetch(`${API_BASE_URL}/chatrooms/${roomId}/update`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${userSession.token}`,
       },
+      credentials: "include",
       body: JSON.stringify({ participantIds }),
     });
 
@@ -111,23 +110,23 @@ export async function updateChatRoom(
  * @returns {Promise<boolean>} 退出成功返回true，失敗返回false
  */
 export async function leaveChatRoom(roomId: string): Promise<boolean> {
-  const userSession = getUserSession();
-  if (!userSession || !userSession.token) {
-    notifications.show({
-      title: "錯誤",
-      message: "未登入或缺少認證資訊，無法退出聊天室。",
-      color: "red",
-    });
-    return false;
-  }
+  // const userSession = getUserSession();
+  // if (!userSession || !userSession.token) {
+  //   notifications.show({
+  //     title: "錯誤",
+  //     message: "未登入或缺少認證資訊，無法退出聊天室。",
+  //     color: "red",
+  //   });
+  //   return false;
+  // }
 
   try {
     const response = await fetch(`${API_BASE_URL}/chatrooms/${roomId}/leave`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${userSession.token}`,
       },
+      credentials: "include",
     });
 
     if (!response.ok) {
@@ -159,15 +158,15 @@ export async function leaveChatRoom(roomId: string): Promise<boolean> {
 export async function createChatRoom( //
   participantIds: string[] //
 ): Promise<ChatRoom | null> {
-  const userSession = getUserSession();
-  if (!userSession || !userSession.token) {
-    notifications.show({
-      title: "錯誤",
-      message: "未登入或缺少認證資訊，無法建立聊天室。",
-      color: "red",
-    });
-    return null;
-  }
+  // const userSession = getUserSession();
+  // if (!userSession || !userSession.token) {
+  //   notifications.show({
+  //     title: "錯誤",
+  //     message: "未登入或缺少認證資訊，無法建立聊天室。",
+  //     color: "red",
+  //   });
+  //   return null;
+  // }
 
   try {
     const response = await fetch(`${API_BASE_URL}/create-chatrooms`, {
@@ -175,8 +174,8 @@ export async function createChatRoom( //
       method: "POST", //
       headers: {
         "Content-Type": "application/json", //
-        Authorization: `Bearer ${userSession.token}`, //
       },
+      credentials: "include",
       body: JSON.stringify({
         participantIds,
       }),
@@ -212,13 +211,13 @@ export const addParticipantsToChatRoom = async (
   newParticipantIds: string[]
 ): Promise<ChatRoom> => {
   // 從 getUserSession 獲取整個使用者會話物件，其中包含 token
-  const userSession = getUserSession();
+  // const userSession = getUserSession();
 
   // 檢查 userSession 和 token 是否存在
-  if (!userSession || !userSession.token) {
-    // 抛出更具描述性的錯誤
-    throw new Error("Authentication token not found. Please log in.");
-  }
+  // if (!userSession || !userSession.token) {
+  // 抛出更具描述性的錯誤
+  //   throw new Error("Authentication token not found. Please log in.");
+  // }
 
   const response = await fetch(
     `${API_BASE_URL}/chatrooms/${roomId}/participants`,
@@ -226,8 +225,8 @@ export const addParticipantsToChatRoom = async (
       method: "PUT", // 後端定義的是 PUT 方法
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${userSession.token}`, // <-- 使用從 userSession 獲取的 token
       },
+      credentials: "include",
       body: JSON.stringify({ newParticipantIds }), // 注意這裡的 key 必須與後端 AddParticipantsRequest 匹配
     }
   );

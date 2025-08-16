@@ -1,6 +1,5 @@
 // src/api/user.ts
 import { notifications } from "@mantine/notifications";
-import { getUserSession } from "../utils/utils_auth";
 import type { User } from "../types/index";
 
 const API_BASE_URL = "http://localhost:8080";
@@ -9,17 +8,17 @@ const API_BASE_URL = "http://localhost:8080";
 export const getAllUsers = async (): Promise<User[]> => {
   try {
     // 獲取用戶 session
-    const session = getUserSession();
-    if (!session?.token) {
-      throw new Error("未登入或 token 無效");
-    }
+    // const session = getUserSession();
+    // if (!session?.token) {
+    //   throw new Error("未登入或 token 無效");
+    // }
 
     const response = await fetch(`${API_BASE_URL}/all-users`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session.token}`,
       },
+      credentials: "include",
     });
 
     if (!response.ok) {

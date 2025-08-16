@@ -3,8 +3,6 @@
 interface UserSession {
   id: string;
   username: string;
-  email?: string;
-  token?: string;  // 添加 token 欄位
 }
 
 const USER_SESSION_KEY = "user_session";
@@ -18,9 +16,12 @@ export const getUserSession = (): UserSession | null => {
   const sessionString = localStorage.getItem(USER_SESSION_KEY);
   if (sessionString) {
     try {
-      return JSON.parse(sessionString);
+      const session: UserSession = JSON.parse(sessionString);
+      return session;
     } catch (e) {
       console.error("Failed to parse user session from localStorage", e);
+      // 如果解析失敗，順便清除壞掉的資料
+      clearUserSession();
       return null;
     }
   }

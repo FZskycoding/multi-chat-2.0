@@ -7,6 +7,7 @@ import {
 } from "../api/api_chatroom";
 import type { ChatRoom, User, Message } from "../types";
 import { notifications } from "@mantine/notifications";
+import { API_BASE_URL } from "../config";
 
 export const useChat = (
   userSession: ReturnType<typeof import("../utils/utils_auth").getUserSession>
@@ -30,12 +31,11 @@ export const useChat = (
 
   const fetchChatHistory = useCallback(
     async (roomId: string) => {
-      if (!userSession?.token) return [];
       try {
         const response = await fetch(
-          `http://localhost:8080/chat-history?roomId=${roomId}`,
+          `${API_BASE_URL}/chat-history?roomId=${roomId}`,
           {
-            headers: { Authorization: `Bearer ${userSession.token}` },
+            credentials: "include",
           }
         );
         if (!response.ok) throw new Error("Failed to fetch chat history");
@@ -46,7 +46,7 @@ export const useChat = (
         return [];
       }
     },
-    [userSession]
+    []
   );
 
   const handleSelectRoom = useCallback(
@@ -68,7 +68,7 @@ export const useChat = (
       const history = await fetchChatHistory(room.id);
       setMessages((prev) => new Map(prev).set(room.id, history));
     },
-    [userSession, fetchUserChatRooms, fetchChatHistory]
+    [userSession, fetchUserChatRooms, fetchChatHistory, setSelectedRoom, setMessages]
   );
 
   const handleLeaveRoom = useCallback(

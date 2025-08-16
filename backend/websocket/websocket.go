@@ -285,13 +285,19 @@ func BroadcastMessage(message models.Message) {
 
 // HandleConnections 處理 WebSocket 連線請求
 func HandleConnections(w http.ResponseWriter, r *http.Request) {
-	// 步驟 1: 從 URL 查詢參數中獲取 token
-	tokenString := r.URL.Query().Get("token")
-	if tokenString == "" {
-		log.Println("ERROR: Connection rejected. Reason: Token is missing from URL query.")
-		http.Error(w, "Authentication token is required", http.StatusBadRequest)
+	// 步驟 1: 從 Cookie 獲取 token
+	cookie, err := r.Cookie("token")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			log.Println("ERROR: Connection rejected. Reason: Token cookie not found.")
+			http.Error(w, "Authorization cookie required", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("ERROR: Connection rejected. Reason: Error reading cookie. Error: %v", err)
+		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
+	tokenString := cookie.Value
 
 	// 步驟 2: 載入設定並驗證 JWT Token
 	cfg := config.LoadConfig()

@@ -146,11 +146,18 @@ func TestLoginUser(t *testing.T) {
 		// --- 斷言結果 ---
 		assert.Equal(t, http.StatusOK, rr.Code, "狀態碼應該是 200 OK")
 
-		// 斷言回應的 body 中有 token
+		// 1. 斷言 JSON body 的內容是正確的
 		var loginResponse models.LoginResponse
 		err := json.Unmarshal(rr.Body.Bytes(), &loginResponse)
 		assert.NoError(t, err, "解析成功的回應 body 不應出錯")
 		assert.Equal(t, "Login successful", loginResponse.Message)
 		assert.Equal(t, mockUser.Username, loginResponse.Username)
+
+		// 2. 斷言 Set-Cookie 標頭存在且包含我們需要的內容
+    setCookieHeader := rr.Result().Header.Get("Set-Cookie")
+    assert.NotEmpty(t, setCookieHeader, "回應標頭中應該包含 Set-Cookie")
+    assert.Contains(t, setCookieHeader, "token=", "Set-Cookie 標頭應該包含 token")
+    assert.Contains(t, setCookieHeader, "HttpOnly", "Cookie 應該被設定為 HttpOnly")
+    assert.Contains(t, setCookieHeader, "SameSite=Strict", "Cookie 應該被設定為 SameSite=Strict")
 	})
 }
