@@ -152,7 +152,5 @@ func TestLoginUser(t *testing.T) {
 		assert.NoError(t, err, "解析成功的回應 body 不應出錯")
 		assert.Equal(t, "Login successful", loginResponse.Message)
 		assert.Equal(t, mockUser.Username, loginResponse.Username)
-		assert.NotEmpty(t, loginResponse.Token, "回應中應該要包含 JWT token")
 	})
-
 }

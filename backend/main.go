@@ -48,6 +48,7 @@ func main() {
 	// 不需要 JWT 的路由
 	router.HandleFunc("/register", authHandler.RegisterUser).Methods("POST")
 	router.HandleFunc("/login", authHandler.LoginUser).Methods("POST")
+	router.HandleFunc("/logout", authHandler.LogoutUser).Methods("POST")
 	router.HandleFunc("/auth/google/login", handlers.HandleGoogleLogin).Methods("GET")
 	router.HandleFunc("/auth/google/callback", handlers.HandleGoogleCallback).Methods("GET")
 

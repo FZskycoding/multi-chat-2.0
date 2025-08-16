@@ -18,13 +18,13 @@ import (
 	"go-chat/backend/config"
 	"go-chat/backend/database"
 	"go-chat/backend/models"
-	"go-chat/backend/utils"
 	"go-chat/backend/store"
+	"go-chat/backend/utils"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"golang.org/x/crypto/bcrypt" 
+	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthHandler 包含處理認證請求的所有依賴
@@ -40,6 +40,7 @@ func NewAuthHandler(userStore store.UserStorer, cfg *config.Config) *AuthHandler
 		Cfg:       cfg,
 	}
 }
+
 // sendJSONError 統一發送 JSON 格式錯誤響應
 func sendJSONError(w http.ResponseWriter, message string, statusCode int) {
 	var errorResponse models.ErrorResponse
@@ -157,15 +158,25 @@ func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
 	log.Printf("User logged in successfully: %s", user.Email)
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "token",
+		Value:    token,
+		Path:     "/",
+		Expires:  time.Now().Add(time.Hour * 24),
+		HttpOnly: true, // true表示JS無法讀取
+		Secure:   true, //只在 HTTPS 連線下傳送
+		SameSite: http.SameSiteStrictMode, // 當請求完全來自自己的網站時，瀏覽器才會帶上這個cookie
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(models.LoginResponse{
 		Message:  "Login successful",
 		ID:       user.ID.Hex(),
 		Username: user.Username,
-		Token:    token,
+		// Token:    token,
 	})
 }
 
@@ -328,13 +339,39 @@ func HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true, // 建議設為 true 增加安全性
+		Secure: true,
+		SameSite: http.SameSiteStrictMode,
 	})
 
-	redirectURL := fmt.Sprintf("http://localhost:5173/home?token=%s&id=%s&username=%s",
-		jwtToken,
-		user.ID.Hex(),
-		url.QueryEscape(user.Username), // 對 username 進行 URL 編碼
-	)
+	http.SetCookie(w, &http.Cookie{
+		Name: "user_info",
+		Value: fmt.Sprintf(`{"id":"%s","username":"%s"}`, user.ID.Hex(), url.QueryEscape(user.Username)),
+		Path: "/",
+		Expires: time.Now().Add(time.Hour * 24),
+	})
 
-	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+	http.Redirect(w, r, "http://localhost:5173/home", http.StatusTemporaryRedirect)
+}
+
+// LogoutUser 處理使用者登出請求
+func (h *AuthHandler) LogoutUser(w http.ResponseWriter, r *http.Request) {
+	// 1. 設定一個 http.Cookie 物件，其名稱與登入時設定的相同 ("token")
+	// 2. 將其 MaxAge 設為 -1，這是一個標準指令，告訴瀏覽器立即刪除這個 cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:   "token",
+		Value:  "", // 值可以為空
+		Path:   "/",
+		MaxAge: -1, // 【核心】立即過期
+	})
+
+	// 同時也刪除 user_info cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:   "user_info",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Logout successful"})
 }
