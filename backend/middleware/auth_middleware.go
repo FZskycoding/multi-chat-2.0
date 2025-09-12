@@ -5,16 +5,14 @@ import (
 	"context"
 	"log"
 	"net/http"
-
-	"go-chat/backend/config" // 確保 config 包能獲取 JWT Secret
 	"go-chat/backend/utils"
 )
 
 // JWTMiddleware 驗證 JWT Token 並將使用者 ID 放入 context
-func JWTMiddleware(next http.Handler) http.Handler {
+func JWTMiddleware(next http.Handler, jwtSecret string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg := config.LoadConfig()
-		jwtSecret := cfg.JWTSecret
+		// cfg := config.LoadConfig()
+		// jwtSecret := cfg.JWTSecret
 
 		// --- 核心修改：從 Cookie 讀取 Token ---
 		cookie, err := r.Cookie("token")

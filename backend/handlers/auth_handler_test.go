@@ -10,7 +10,8 @@ import (
 
 	"go-chat/backend/config"
 	"go-chat/backend/models"
-	"go-chat/backend/store/mocks" 
+	"go-chat/backend/store/mocks"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/crypto/bcrypt"
 
@@ -101,7 +102,7 @@ func TestLoginUser(t *testing.T) {
 		mockUserStore.EXPECT().
 			FindUserByEmail(gomock.Any(), "user@example.com").
 			Return(mockUser, nil). // 回傳 mockUser 和 nil 錯誤
-			Times(1)
+			Times(1)               // 只會發生1次，如果不是1次則測試失敗
 
 		// --- 執行 handler ---
 		authHandler.LoginUser(rr, req)
@@ -151,13 +152,135 @@ func TestLoginUser(t *testing.T) {
 		err := json.Unmarshal(rr.Body.Bytes(), &loginResponse)
 		assert.NoError(t, err, "解析成功的回應 body 不應出錯")
 		assert.Equal(t, "Login successful", loginResponse.Message)
-		assert.Equal(t, mockUser.Username, loginResponse.Username)
+		assert.Equal(t, mockUser.Username, loginResponse.Username) //Username必須等於我們一開始準備的mockUser名字
 
 		// 2. 斷言 Set-Cookie 標頭存在且包含我們需要的內容
-    setCookieHeader := rr.Result().Header.Get("Set-Cookie")
-    assert.NotEmpty(t, setCookieHeader, "回應標頭中應該包含 Set-Cookie")
-    assert.Contains(t, setCookieHeader, "token=", "Set-Cookie 標頭應該包含 token")
-    assert.Contains(t, setCookieHeader, "HttpOnly", "Cookie 應該被設定為 HttpOnly")
-    assert.Contains(t, setCookieHeader, "SameSite=Strict", "Cookie 應該被設定為 SameSite=Strict")
+		setCookieHeader := rr.Result().Header.Get("Set-Cookie") //從回應的 Header 中，把 Set-Cookie 這一項的完整內容拿出來。
+		assert.NotEmpty(t, setCookieHeader, "回應標頭中應該包含 Set-Cookie")
+		assert.Contains(t, setCookieHeader, "token=", "Set-Cookie 標頭應該包含 token")
+		assert.Contains(t, setCookieHeader, "HttpOnly", "Cookie 應該被設定為 HttpOnly")
+		assert.Contains(t, setCookieHeader, "SameSite=Strict", "Cookie 應該被設定為 SameSite=Strict")
 	})
+}
+
+func TestRegisterUser(t *testing.T) {
+	// 建立一個 gomock 控制器，它管理著所有 mock 物件的生命週期和期望
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish() // 在測試結束時，檢查所有期望是否都已滿足
+
+	// 建立一個 mock UserStore
+	mockUserStore := mocks.NewMockUserStorer(ctrl)
+
+	cfg := &config.Config{}
+	authHandler := NewAuthHandler(mockUserStore, cfg)
+
+	t.Run("成功註冊", func(t *testing.T) {
+		registerCredentials := models.RegisterRequest{
+			Email:    "newUser@gmail.com",
+			Username: "newUser",
+			Password: "123456",
+		}
+		body, _ := json.Marshal(registerCredentials)
+
+		req := httptest.NewRequest("POST", "/register", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		mockUserStore.EXPECT().
+			CheckUserExists(gomock.Any(), registerCredentials.Email, registerCredentials.Username).
+			Return(false, false, nil). // 回報「Email不存在」和「Username不存在」和資料庫沒有發生錯誤，表示可正常註冊
+			Times(1)
+
+		mockUserStore.EXPECT().
+			CreateUser(gomock.Any(), gomock.Any()). // 這裡先用 gomock.Any() 簡化
+			Return(primitive.NewObjectID(), nil).   // 回傳一個假的、新產生的使用者 ID
+			Times(1)
+
+		authHandler.RegisterUser(rr, req)
+
+		assert.Equal(t, http.StatusCreated, rr.Code, "狀態碼應該是 201 Created")
+
+		var registerResponse models.RegisterResponse
+		err := json.Unmarshal(rr.Body.Bytes(), &registerResponse)
+		assert.NoError(t, err)
+		assert.Equal(t, "User registered successfully", registerResponse.Message)
+		assert.NotEmpty(t, registerResponse.ID, "回應中應該包含一個使用者ID") // 如果registerResponse.ID是空的，就顯示錯誤訊息
+
+	})
+
+	t.Run("註冊失敗 - Email 已存在", func(t *testing.T) {
+		registerCredentials := models.RegisterRequest{
+			Email:    "existing@gmail.com",
+			Username: "newUser",
+			Password: "123456",
+		}
+		body, _ := json.Marshal(registerCredentials)
+
+		req := httptest.NewRequest("POST", "/register", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		mockUserStore.EXPECT().
+			CheckUserExists(gomock.Any(), registerCredentials.Email, registerCredentials.Username).
+			Return(true, false, nil). // 回報「Email已存在」和「Username不存在」和資料庫沒有發生錯誤
+			Times(1)
+
+		authHandler.RegisterUser(rr, req)
+
+		assert.Equal(t, http.StatusConflict, rr.Code, "狀態碼應該是 409 Conflict")
+
+		var errorResponse models.RegisterResponse
+		err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+		assert.NoError(t, err)
+		assert.Equal(t, "Email already registered", errorResponse.Message, "錯誤訊息不符預期") //如果errorResponse.Message不等於"Email already registered"的話就出現錯誤訊息
+
+	})
+
+	t.Run("註冊失敗 - 使用者名稱已存在", func(t *testing.T) {
+		registerCredentials := models.RegisterRequest{
+			Email:    "existing@gmail.com",
+			Username: "newUser",
+			Password: "123456",
+		}
+		body, _ := json.Marshal(registerCredentials)
+
+		req := httptest.NewRequest("POST", "/register", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		mockUserStore.EXPECT().
+			CheckUserExists(gomock.Any(), registerCredentials.Email, registerCredentials.Username).
+			Return(false, true, nil). // 回報「Email不存在」和「Username已存在」和資料庫沒有發生錯誤
+			Times(1)
+
+		authHandler.RegisterUser(rr, req)
+
+		assert.Equal(t, http.StatusConflict, rr.Code, "狀態碼應該是 409 Conflict")
+
+		var errorResponse models.RegisterResponse
+		err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+		assert.NoError(t, err)
+		assert.Equal(t, "Username already taken", errorResponse.Message, "錯誤訊息不符預期") //如果errorResponse.Message不等於"Email already registered"的話就出現錯誤訊息
+
+	})
+
+	t.Run("註冊失敗 - 缺少密碼", func(t *testing.T) {
+		registerCredentials := models.RegisterRequest{
+			Email:    "existing@gmail.com",
+			Username: "newUser",
+			Password: "",
+		}
+		body, _ := json.Marshal(registerCredentials)
+
+		req := httptest.NewRequest("POST", "/register", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		authHandler.RegisterUser(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code, "狀態碼應該是 400 Bad Request")
+
+		var errorResponse models.RegisterResponse
+		err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+		assert.NoError(t, err)
+		assert.Equal(t, "Email, username, and password are required", errorResponse.Message, "錯誤訊息不符預期") //如果errorResponse.Message不等於"Email already registered"的話就出現錯誤訊息
+
+	})
+
 }

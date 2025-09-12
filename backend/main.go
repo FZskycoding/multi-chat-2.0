@@ -54,14 +54,14 @@ func main() {
 
 	// --- 需要 JWT 驗證的路由 ---
 	// 獲取所有使用者 API 路由 (需要登入才能看)
-	router.Handle("/all-users", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetAllUsers))).Methods("GET")
+	router.Handle("/all-users", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetAllUsers), cfg.JWTSecret)).Methods("GET")
 
 	// 聊天室相關路由 (需要登入才能操作)
-	router.Handle("/create-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom))).Methods("POST")
-	router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms))).Methods("GET")
-	router.Handle("/chatrooms/{id}/update", middleware.JWTMiddleware(http.HandlerFunc(handlers.UpdateChatRoom))).Methods("PUT")
-	router.Handle("/chatrooms/{id}/leave", middleware.JWTMiddleware(http.HandlerFunc(handlers.LeaveChatRoom))).Methods("POST")
-	router.Handle("/chatrooms/{id}/participants", middleware.JWTMiddleware(http.HandlerFunc(handlers.AddParticipants))).Methods("PUT")
+	router.Handle("/create-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.CreateChatRoom), cfg.JWTSecret)).Methods("POST")
+	router.Handle("/user-chatrooms", middleware.JWTMiddleware(http.HandlerFunc(handlers.GetUserChatRooms), cfg.JWTSecret)).Methods("GET")
+	router.Handle("/chatrooms/{id}/update", middleware.JWTMiddleware(http.HandlerFunc(handlers.UpdateChatRoom), cfg.JWTSecret)).Methods("PUT")
+	router.Handle("/chatrooms/{id}/leave", middleware.JWTMiddleware(http.HandlerFunc(handlers.LeaveChatRoom), cfg.JWTSecret)).Methods("POST")
+	router.Handle("/chatrooms/{id}/participants", middleware.JWTMiddleware(http.HandlerFunc(handlers.AddParticipants), cfg.JWTSecret)).Methods("PUT")
 
 	// WebSocket 路由 (WebSocket 連線通常通過 URL 參數或 Cookies 進行認證，而不是 Authorization Header)
 	// 如果你的 WebSocket 連接在 URL 中傳遞了 token，可能需要在 HandleConnections 內部進行驗證
@@ -70,7 +70,7 @@ func main() {
 	// 這裡需要注意：websocket.HandleChatHistory 如果是 REST API 獲取歷史記錄，應該加上 JWT
 	// 如果這個 /chat-history 是 WebSocket 協定的一部分，那麼應該在 HandleConnections 內部處理
 	// 假設它是一個獨立的 REST API
-	router.Handle("/chat-history", middleware.JWTMiddleware(http.HandlerFunc(websocket.HandleChatHistory))).Methods("GET")
+	router.Handle("/chat-history", middleware.JWTMiddleware(http.HandlerFunc(websocket.HandleChatHistory), cfg.JWTSecret)).Methods("GET")
 
 	// 設置 CORS 中介軟體
 	// 允許來自任何來源的請求，並允許 POST, GET, OPTIONS 方法
