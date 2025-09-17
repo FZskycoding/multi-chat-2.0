@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // TestRegisterUser_Integration 是一個整合測試，測試使用者註冊的完整流程
@@ -105,4 +106,67 @@ func TestRegisterUser_Integration(t *testing.T) {
 
 	})
 
+}
+
+func TestLoginUser_Integration(t *testing.T) {
+	userStore := store.NewMongoUserStore()
+	cfg := &config.Config{
+		JWTSecret: "integration-test-secret",
+	}
+	authHandler := handlers.NewAuthHandler(userStore, cfg)
+	usersCollection := database.GetCollection("users")
+	ctx := context.Background()
+
+	// 清理集合，確保測試環境是乾淨的
+	usersCollection.DeleteMany(ctx, bson.M{})
+	// --- 步驟 1: 準備 (Arrange) - 手動在資料庫中建立一個使用者 ---
+	password := "password123"
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	require.NoError(t, err, "Hash 密碼不應出錯")
+
+	testUser := models.User{
+		Email:    "login-test@example.com",
+		Username: "login-user",
+		Password: string(hashedPassword),
+	}
+	_, err = usersCollection.InsertOne(ctx, testUser)
+	require.NoError(t, err, "在測試資料庫中插入使用者不應出錯")
+
+	// --- 測試案例 1: 成功登入 ---
+	t.Run("成功登入", func(t *testing.T) {
+		// --- 步驟 2: 執行 (Act) ---
+		loginCredentials := map[string]string{
+			"email":    testUser.Email,
+			"password": password, // <-- 注意：這裡用的是原始密碼
+		}
+		body, _ := json.Marshal(loginCredentials)
+		req := httptest.NewRequest("POST", "/login", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		authHandler.LoginUser(rr, req)
+
+		// --- 步驟 3: 斷言 (Assert) ---
+		assert.Equal(t, http.StatusOK, rr.Code, "狀態碼應該是 200 OK")
+
+		// 檢查 Cookie 是否被正確設定
+		setCookieHeader := rr.Result().Header.Get("Set-Cookie")
+		assert.NotEmpty(t, setCookieHeader, "回應標頭中應該包含 Set-Cookie")
+		assert.Contains(t, setCookieHeader, "token=", "Cookie 中應該包含 token")
+		assert.Contains(t, setCookieHeader, "HttpOnly", "Cookie 應該被設定為 HttpOnly")
+	})
+
+	// --- 測試案例 2: 密碼錯誤 ---
+	t.Run("登入失敗 - 密碼錯誤", func(t *testing.T) {
+		loginCredentials := map[string]string{
+			"email":    testUser.Email,
+			"password": "wrong-password",
+		}
+		body, _ := json.Marshal(loginCredentials)
+		req := httptest.NewRequest("POST", "/login", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		authHandler.LoginUser(rr, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rr.Code, "密碼錯誤時，狀態碼應該是 401")
+	})
 }
