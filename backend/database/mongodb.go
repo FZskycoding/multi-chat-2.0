@@ -2,8 +2,12 @@ package database
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"time"
+	"go-chat/backend/config"
+	"github.com/redis/go-redis/v9"
 
 	"go-chat/backend/models"
 
@@ -257,11 +261,32 @@ func DeleteChatRoom(roomID primitive.ObjectID) error {
 }
 
 // GetUserChatRooms 獲取使用者所參與的所有聊天室
-func GetUserChatRooms(userID primitive.ObjectID) ([]models.ChatRoom, error) {
-	collection := GetCollection("chatrooms")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func GetUserChatRooms(userID primitive.ObjectID, cfg *config.Config) ([]models.ChatRoom, error) {
+	cacheKey := fmt.Sprintf("user-chatrooms:%s", userID.Hex())
+	ctx := context.Background()
+	result, err := RedisClient.Get(ctx, cacheKey).Result()
 
+	if err == nil {
+		// --- 快取命中 (Cache Hit) ---
+		log.Printf("Cache HIT for user %s", userID.Hex())
+		var chatRooms []models.ChatRoom
+		// 將從 Redis 拿到的 JSON 字串，解碼回 Go 的 []ChatRoom 結構
+		if err := json.Unmarshal([]byte(result), &chatRooms); err != nil {
+			log.Printf("Error unmarshalling chat rooms from cache: %v", err)
+			// 如果解碼失敗，就當作快取未命中，繼續往下走
+		} else {
+			return chatRooms, nil // 成功解碼，直接回傳結果！
+		}
+	}
+
+	// 如果錯誤不是 redis.Nil，代表 Redis 本身出了問題，記錄下來但繼續執行
+	if err != redis.Nil {
+		log.Printf("Redis error on GET: %v. Proceeding to fetch from DB.", err)
+	}
+
+	// --- 步驟 2: 快取未命中 (Cache Miss)，從 MongoDB 讀取 ---
+	log.Printf("Cache MISS for user %s. Fetching from MongoDB.", userID.Hex())
+	collection := GetCollection("chatrooms")
 	filter := bson.M{"participants": userID}
 	findOptions := options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}})
 
@@ -277,5 +302,19 @@ func GetUserChatRooms(userID primitive.ObjectID) ([]models.ChatRoom, error) {
 		log.Printf("Error decoding chatrooms for user %s: %v", userID.Hex(), err)
 		return nil, err
 	}
+
+	// --- 步驟 3: 將從 MongoDB 拿到的結果，寫回 Redis 快取 ---
+	// 先將 Go 的 []ChatRoom 結構，編碼成 JSON 字串
+	data, err := json.Marshal(chatRooms)
+	if err != nil {
+		log.Printf("Error marshalling chat rooms for cache: %v", err)
+	} else {
+		// 將 JSON 字串存入 Redis，並設定 10 分鐘的過期時間
+		err := RedisClient.Set(ctx, cacheKey, data, 10*time.Minute).Err()
+		if err != nil {
+			log.Printf("Failed to set cache for user %s: %v", userID.Hex(), err)
+		}
+	}
+
 	return chatRooms, nil
 }

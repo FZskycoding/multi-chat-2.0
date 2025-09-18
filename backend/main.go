@@ -25,6 +25,7 @@ func main() {
 	cfg := config.LoadConfig()
 
 	database.ConnectMongoDB(cfg.MongoDBURI, cfg.DBName)
+	database.ConnectRedis(cfg.RedisAddr)
 	defer database.DisconnectMongoDB()
 
 	// 初始化 Google OAuth 設定

@@ -3,7 +3,8 @@ package config
 import (
 	"log"
 	"os"
-
+	"time"
+	"strconv"
 	"github.com/joho/godotenv" // 引入這個庫來讀取 .env 檔案
 )
 
@@ -16,6 +17,8 @@ type Config struct {
 	GoogleClientID     string
 	GoogleClientSecret string
 	GoogleRedirectURL  string
+	RedisAddr          string
+	RedisCacheExpiration time.Duration
 }
 
 // LoadConfig 載入配置，優先從環境變數讀取，其次從 .env 檔案讀取
@@ -26,6 +29,15 @@ func LoadConfig() *Config {
 		log.Println("No .env file found, relying on environment variables.")
 	}
 
+	// 預設為10分鐘的快取
+	expMinutesStr := getEnv("REDIS_CACHE_EXPIRATION_MINUTES", "10")
+    expMinutes, err := strconv.Atoi(expMinutesStr)
+    if err != nil {
+        log.Printf("Invalid cache expiration value, defaulting to 10 minutes: %v", err)
+        expMinutes = 10
+    }
+    cacheExpiration := time.Duration(expMinutes) * time.Minute
+
 	cfg := &Config{
 		MongoDBURI:         getEnv("MONGODB_URI", "mongodb://localhost:27017"),
 		DBName:             getEnv("DB_NAME", "chat_app_db"),
@@ -34,6 +46,8 @@ func LoadConfig() *Config {
 		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", ""),
+		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisCacheExpiration: cacheExpiration,
 	}
 	return cfg
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"go-chat/backend/config"
 	"go-chat/backend/database"
 	"go-chat/backend/models"
 	"go-chat/backend/utils" // 引入 utils 套件
@@ -139,9 +140,11 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newChatRoom.ID = result.InsertedID.(primitive.ObjectID)
+	// 當一個新聊天室被建立時，所有參與者的聊天室列表都改變了。
+	// 所以我們需要刪除「所有」參與者的快取。
+	database.InvalidateMultipleUserChatRoomsCache(participantObjectIDs)
 
-	// 【關鍵修正】在這裡補上 WebSocket 廣播
-	// 建立一個 room_state_update 類型的訊息
+	// 建立一個 room_state_update 類型的訊息，並執行 WebSocket 廣播
 	roomUpdateMessage := models.Message{
 		Type:           models.MessageTypeUpdate,
 		RoomID:         newChatRoom.ID.Hex(),
@@ -174,19 +177,22 @@ func CreateChatRoom(w http.ResponseWriter, r *http.Request) {
 
 // GetUserChatRooms 處理獲取使用者所有聊天室的請求
 func GetUserChatRooms(w http.ResponseWriter, r *http.Request) {
+	// 1. 檢查database在找使用者擁有的聊天室時，有沒有出現錯誤
 	userID, err := utils.GetUserIDFromContext(r.Context())
 	if err != nil {
 		http.Error(w, "Unauthorized: User ID not found in context", http.StatusUnauthorized)
 		return
 	}
 
-	chatRooms, err := database.GetUserChatRooms(userID)
+	cfg := config.LoadConfig()
+	chatRooms, err := database.GetUserChatRooms(userID, cfg)
 	if err != nil {
 		log.Printf("Error getting chatrooms for user %s: %v", userID.Hex(), err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
+	// 2. 將結果轉換成JSON格式透過回覆工具 w，寫入到 HTTP 的回應 Body 中，最終傳送回給前端（瀏覽器）。
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(chatRooms)
 }
@@ -266,6 +272,13 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 		// 如果聊天室被刪除，finalRoomNameForMessage 仍使用舊名稱表示離開了哪個房間
 	}
 
+	// 1. 刪除「正在離開的」這個使用者的快取
+	database.InvalidateUserChatRoomsCache(userID)
+	// 2. 聊天室的名稱和成員列表都變了，所以我們也需要
+	//    刪除「所有還留在聊天室裡的」其他成員的快取，
+	//    確保他們能看到最新的成員列表。
+	database.InvalidateMultipleUserChatRoomsCache(newParticipants)
+
 	// 獲取退出使用者的用戶名和創建系統消息
 	exitingUser, err := database.GetUserByID(userID)
 	if err != nil {
@@ -300,8 +313,8 @@ func LeaveChatRoom(w http.ResponseWriter, r *http.Request) {
 		RoomID:         roomID.Hex(),
 		RoomName:       finalRoomNameForMessage, // 使用更新或舊的聊天室名稱
 		SenderID:       primitive.NilObjectID,   // 系統訊息的 SenderID 設置為空
-		SenderUsername: "系統更新",                 // 區分於邀請通知
-		Content:        "聊天室成員或名稱已更新。",         // 可以是任意通知內容，客戶端主要依賴類型判斷
+		SenderUsername: "系統更新",                  // 區分於邀請通知
+		Content:        "聊天室成員或名稱已更新。",          // 可以是任意通知內容，客戶端主要依賴類型判斷
 		Timestamp:      time.Now(),
 		IsRead:         true, // 通常不需要已讀狀態
 	}
@@ -416,6 +429,7 @@ func AddParticipants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	database.InvalidateMultipleUserChatRoomsCache(updatedParticipants)
 	// --- 處理系統訊息 ---
 	// 獲取邀請者和新參與者的用戶名
 	var allUserIDsForMessage []primitive.ObjectID
