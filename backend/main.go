@@ -13,11 +13,12 @@ import (
 	"go-chat/backend/config"
 	"go-chat/backend/database"
 	"go-chat/backend/handlers"
+	"go-chat/backend/loadtestcontrol"
 	"go-chat/backend/middleware"
 	"go-chat/backend/websocket" // 引入 websocket 套件
 
 	"github.com/gorilla/mux"
-	"github.com/rs/cors" 
+	"github.com/rs/cors"
 	"go-chat/backend/store"
 )
 
@@ -72,6 +73,12 @@ func main() {
 	// 如果這個 /chat-history 是 WebSocket 協定的一部分，那麼應該在 HandleConnections 內部處理
 	// 假設它是一個獨立的 REST API
 	router.Handle("/chat-history", middleware.JWTMiddleware(http.HandlerFunc(websocket.HandleChatHistory), cfg.JWTSecret)).Methods("GET")
+
+	if cfg.LoadtestMode {
+		router.HandleFunc("/loadtest/barrier/status", loadtestcontrol.HandleBarrierStatus).Methods("GET")
+		router.HandleFunc("/loadtest/barrier/reset", loadtestcontrol.HandleBarrierReset).Methods("POST")
+		router.HandleFunc("/loadtest/barrier/open", loadtestcontrol.HandleBarrierOpen).Methods("POST")
+	}
 
 	// 設置 CORS 中介軟體
 	// 允許來自任何來源的請求，並允許 POST, GET, OPTIONS 方法

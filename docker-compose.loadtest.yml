@@ -1,0 +1,37 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: go-chat-loadtest-mongo
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+
+  redis:
+    image: redis:7-alpine
+    container_name: go-chat-loadtest-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: go-chat-loadtest-backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - redis
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      DB_NAME: chat_app_loadtest
+      PORT: "8080"
+      JWT_SECRET: loadtest_jwt_secret_change_me
+      REDIS_ADDR: redis:6379
+      REDIS_CACHE_EXPIRATION_MINUTES: "10"
+      LOADTEST_MODE: "true"
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      GOOGLE_REDIRECT_URL: ""
+    ports:
+      - "18080:8080"

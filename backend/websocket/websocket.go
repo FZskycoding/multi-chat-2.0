@@ -2,13 +2,14 @@ package websocket
 
 import (
 	"encoding/json"
+	"go-chat/backend/config"
+	"go-chat/backend/utils"
 	"log"
 	"net/http"
 	"time"
-	"go-chat/backend/config"  
-	"go-chat/backend/utils"
 
 	"go-chat/backend/database"
+	"go-chat/backend/loadtestcontrol"
 	"go-chat/backend/models"
 
 	"github.com/gorilla/websocket"
@@ -223,6 +224,25 @@ func (h *Hub) Run() {
 			}
 			h.clients[client] = true
 			h.clientsByUserID[client.UserID] = client
+			if loadtestcontrol.SetConnectedClients(len(h.clients)) {
+				startMessage := models.Message{
+					Type:           models.MessageTypeLoadtestStart,
+					RoomID:         "",
+					RoomName:       "",
+					SenderID:       primitive.NilObjectID,
+					SenderUsername: "loadtest-controller",
+					Content:        "start",
+					Timestamp:      time.Now(),
+					IsRead:         true,
+				}
+				for activeClient := range h.clients {
+					select {
+					case activeClient.send <- startMessage:
+					default:
+						log.Printf("Client %s channel full during loadtest start broadcast.", activeClient.UserID.Hex())
+					}
+				}
+			}
 			log.Printf("Client %s (%s) registered. Total clients: %d", client.UserID.Hex(), client.Username, len(h.clients))
 
 		case client := <-h.unregister:
@@ -233,6 +253,7 @@ func (h *Hub) Run() {
 				if h.clientsByUserID[client.UserID] == client {
 					delete(h.clientsByUserID, client.UserID)
 				}
+				loadtestcontrol.SetConnectedClients(len(h.clients))
 				close(client.send)
 				log.Printf("Client %s (%s) unregistered. Total clients: %d", client.UserID.Hex(), client.Username, len(h.clients))
 			}
@@ -315,7 +336,7 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
-	
+
 	// 步驟 4: 升級 HTTP 連線為 WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -323,8 +344,7 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 		// upgrader.Upgrade 會自動回傳 HTTP 錯誤，所以這裡只需要記錄日誌
 		return
 	}
-    log.Printf("DEBUG: WebSocket upgrade successful for user %s (%s)", user.Username, user.ID.Hex())
-
+	log.Printf("DEBUG: WebSocket upgrade successful for user %s (%s)", user.Username, user.ID.Hex())
 
 	// 步驟 5: 建立 Client 物件，並使用從資料庫中獲得的、可信的資訊
 	client := &Client{
